@@ -91,7 +91,8 @@ elif page == "🖼️ 画像生成":
     from ui.pages.image_page import show_image_page
     show_image_page()
 elif page == "🎬 動画編集":
-    st.info("動画編集機能は準備中です。")
+    from ui.pages.video_page import show_video_page
+    show_video_page()
 
 # サイドバーに設定情報を表示
 st.sidebar.markdown("---")
