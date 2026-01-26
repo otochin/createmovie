@@ -18,16 +18,22 @@ def show_audio_page():
     st.markdown("---")
     
     # セッションステートの初期化
-    if "audio_generator" not in st.session_state:
-        try:
-            st.session_state.audio_generator = AudioGenerator()
-        except ValueError as e:
-            st.error(f"⚠️ {e}")
-            st.info("`.env`ファイルに`ELEVENLABS_API_KEY`と`ELEVENLABS_VOICE_ID`を設定してください。")
-            return
-    
     if "generated_audios" not in st.session_state:
         st.session_state.generated_audios = {}
+    
+    if "elevenlabs_model_id" not in st.session_state:
+        from config.config import config
+        st.session_state.elevenlabs_model_id = config.elevenlabs_model_id
+    
+    # AudioGeneratorの初期化（モデルIDが変更された場合は再作成）
+    try:
+        if "audio_generator" not in st.session_state or st.session_state.get("current_model_id") != st.session_state.elevenlabs_model_id:
+            st.session_state.audio_generator = AudioGenerator(model_id=st.session_state.elevenlabs_model_id)
+            st.session_state.current_model_id = st.session_state.elevenlabs_model_id
+    except ValueError as e:
+        st.error(f"⚠️ {e}")
+        st.info("`.env`ファイルに`ELEVENLABS_API_KEY`と`ELEVENLABS_VOICE_ID`を設定してください。")
+        return
     
     # 台本の読み込み
     st.subheader("📝 台本の選択")
@@ -75,6 +81,27 @@ def show_audio_page():
     
     st.markdown("---")
     st.subheader("🎚️ 音声生成設定")
+    
+    # モデル選択
+    model_options = {
+        "eleven_turbo_v2_5": "Eleven Turbo V2.5 (V3 - 推奨)",
+        "eleven_multilingual_v2": "Eleven Multilingual V2",
+        "eleven_multilingual_v3": "Eleven Multilingual V3 (利用可能な場合)"
+    }
+    
+    selected_model = st.selectbox(
+        "音声モデル",
+        options=list(model_options.keys()),
+        format_func=lambda x: model_options[x],
+        index=0,
+        help="使用するElevenLabsの音声モデルを選択してください"
+    )
+    
+    # セッションステートにモデルIDを保存
+    if "elevenlabs_model_id" not in st.session_state:
+        st.session_state.elevenlabs_model_id = selected_model
+    else:
+        st.session_state.elevenlabs_model_id = selected_model
     
     col1, col2 = st.columns(2)
     with col1:

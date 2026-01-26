@@ -40,6 +40,10 @@ class Config:
         self.elevenlabs_api_key: Optional[str] = os.getenv("ELEVENLABS_API_KEY")
         self.elevenlabs_voice_id: Optional[str] = os.getenv("ELEVENLABS_VOICE_ID")
         
+        # ElevenLabsモデルID（環境変数から読み込む、なければデフォルト値）
+        from .constants import ELEVENLABS_MODEL_ID
+        self.elevenlabs_model_id: str = os.getenv("ELEVENLABS_MODEL_ID", ELEVENLABS_MODEL_ID)
+        
         # 動画設定（環境変数から読み込む、なければデフォルト値）
         self.video_width: int = int(os.getenv("VIDEO_WIDTH", VIDEO_WIDTH))
         self.video_height: int = int(os.getenv("VIDEO_HEIGHT", VIDEO_HEIGHT))

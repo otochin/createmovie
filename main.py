@@ -88,7 +88,8 @@ elif page == "🎤 音声生成":
     from ui.pages.audio_page import show_audio_page
     show_audio_page()
 elif page == "🖼️ 画像生成":
-    st.info("画像生成機能は準備中です。")
+    from ui.pages.image_page import show_image_page
+    show_image_page()
 elif page == "🎬 動画編集":
     st.info("動画編集機能は準備中です。")
 

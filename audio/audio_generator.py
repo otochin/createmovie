@@ -9,7 +9,6 @@ from elevenlabs import Voice, VoiceSettings
 
 from config.config import config
 from config.constants import (
-    ELEVENLABS_MODEL_ID,
     ELEVENLABS_STABILITY,
     ELEVENLABS_SIMILARITY_BOOST,
     AUDIO_FORMAT
@@ -23,7 +22,7 @@ logger = get_logger(__name__)
 class AudioGenerator:
     """音声生成クラス"""
     
-    def __init__(self):
+    def __init__(self, model_id: Optional[str] = None):
         if not config.elevenlabs_api_key:
             raise ValueError("ELEVENLABS_API_KEYが設定されていません。.envファイルを確認してください。")
         
@@ -32,7 +31,8 @@ class AudioGenerator:
         
         self.client = ElevenLabs(api_key=config.elevenlabs_api_key)
         self.voice_id = config.elevenlabs_voice_id
-        self.model_id = ELEVENLABS_MODEL_ID
+        # モデルIDは引数で指定された場合、それを使用。なければ設定から読み込む
+        self.model_id = model_id if model_id else config.elevenlabs_model_id
     
     def generate_audio(
         self,

@@ -28,7 +28,11 @@ OPENAI_IMAGE_QUALITY = "standard"
 
 # ElevenLabs設定
 ELEVENLABS_DEFAULT_VOICE_ID = None  # .envから読み込む
-ELEVENLABS_MODEL_ID = "eleven_multilingual_v2"  # 日本語対応モデル
+ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"  # Eleven V3モデル（デフォルト）
+# 利用可能なモデル:
+# - "eleven_turbo_v2_5" - Eleven V3 Turbo（高速、高品質）
+# - "eleven_multilingual_v2" - 多言語対応モデル（V2）
+# - "eleven_multilingual_v3" - 多言語対応モデル（V3、利用可能な場合）
 ELEVENLABS_STABILITY = 0.5
 ELEVENLABS_SIMILARITY_BOOST = 0.75
 
