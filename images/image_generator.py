@@ -16,6 +16,7 @@ from config.constants import (
     OPENAI_IMAGE_MODEL,
     OPENAI_IMAGE_SIZE,
     OPENAI_IMAGE_QUALITY,
+    OPENAI_IMAGE_STYLE,
     VIDEO_WIDTH,
     VIDEO_HEIGHT,
     IMAGE_FORMAT
@@ -37,6 +38,7 @@ class ImageGenerator:
         self.model = OPENAI_IMAGE_MODEL
         self.size = OPENAI_IMAGE_SIZE
         self.quality = OPENAI_IMAGE_QUALITY
+        self.style = OPENAI_IMAGE_STYLE  # 実写風画像生成用
         self.text_model = OPENAI_MODEL  # GPT-4o（画像分析用）
     
     def sanitize_prompt(self, prompt: str) -> str:
@@ -65,6 +67,7 @@ class ImageGenerator:
 - 意図や雰囲気は可能な限り保持する
 - 絵画、イラスト、写真などの表現スタイルは維持する
 - 色彩、構図、ムードなどの視覚的要素は保持する
+- **重要**: 「写真」「実写」「フォト」「フォトリアリスティック」「photorealistic」「photo」「realistic」などの写真・実写に関するキーワードは必ず保持してください。これらは削除や置換をしてはいけません。
 
 出力は、サニタイズされたプロンプトのみを返してください。説明やコメントは不要です。"""
                     },
@@ -173,17 +176,12 @@ class ImageGenerator:
         # プロンプトを構築（参考画像のスタイル説明は含めない - 参考のみ）
         final_prompt = prompt
         
-        # 追加指示がある場合はプロンプトに追加
+        # 追加指示がある場合はプロンプトに追加（余計な装飾テキストなし）
         if instruction:
-            final_prompt = f"""{final_prompt}
-
-【追加指示】
-{instruction}
-
-上記の指示も考慮して画像を生成してください。"""
+            final_prompt = f"{final_prompt}\n{instruction}"
         
-        # プロンプトをサニタイズ（安全フィルタ回避）
-        final_prompt = self.sanitize_prompt(final_prompt)
+        # プロンプトをサニタイズ（安全フィルタ回避）- 一時的に無効化
+        # final_prompt = self.sanitize_prompt(final_prompt)
         
         try:
             # DALL-E 3で画像を生成
@@ -192,6 +190,7 @@ class ImageGenerator:
                 prompt=final_prompt,
                 size=image_size,
                 quality=self.quality,
+                style=self.style,  # 実写風画像生成用（natural）
                 n=1
             )
             

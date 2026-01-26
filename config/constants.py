@@ -24,7 +24,8 @@ VIDEO_ASPECT_RATIO = (9, 16)  # 9:16
 OPENAI_MODEL = "gpt-4o"
 OPENAI_IMAGE_MODEL = "dall-e-3"
 OPENAI_IMAGE_SIZE = "1024x1792"  # 9:16形式に近いサイズ（DALL-E 3の最大サイズ）
-OPENAI_IMAGE_QUALITY = "standard"
+OPENAI_IMAGE_QUALITY = "standard"  # 標準品質設定
+OPENAI_IMAGE_STYLE = "vivid"  # 画像生成スタイル設定（vivid: 鮮やかで詳細、natural: 自然で写実的）
 
 # ElevenLabs設定
 ELEVENLABS_DEFAULT_VOICE_ID = None  # .envから読み込む
