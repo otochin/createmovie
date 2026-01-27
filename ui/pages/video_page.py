@@ -64,15 +64,15 @@ def show_video_page():
     if "video_settings_loaded" not in st.session_state:
         if saved_settings:
             st.session_state.video_add_subtitles = saved_settings.get("add_subtitles", True)
-            st.session_state.video_subtitle_source_idx = saved_settings.get("subtitle_source_idx", 0)
+            st.session_state.video_subtitle_source_idx = saved_settings.get("subtitle_source_idx", 1)  # デフォルト：セリフ
             st.session_state.video_subtitle_fontsize = saved_settings.get("fontsize", 60)
             st.session_state.video_subtitle_color = saved_settings.get("color", "#FFFFFF")
             st.session_state.video_subtitle_stroke_color = saved_settings.get("stroke_color", "#000000")
-            st.session_state.video_subtitle_stroke_width = saved_settings.get("stroke_width", 2)
-            st.session_state.video_subtitle_bottom_offset = saved_settings.get("bottom_offset", 50)
+            st.session_state.video_subtitle_stroke_width = saved_settings.get("stroke_width", 3)  # デフォルト：3
+            st.session_state.video_subtitle_bottom_offset = saved_settings.get("bottom_offset", 500)  # デフォルト：500
             st.session_state.video_bg_video_selected = saved_settings.get("bg_video", "なし（背景動画を使用しない）")
-            st.session_state.video_enable_animation = saved_settings.get("enable_animation", False)
-            st.session_state.video_animation_scale = saved_settings.get("animation_scale", 1.2)
+            st.session_state.video_enable_animation = saved_settings.get("enable_animation", True)  # デフォルト：オン
+            st.session_state.video_animation_scale = saved_settings.get("animation_scale", 1.1)  # デフォルト：1.1
             st.session_state.video_settings_loaded = True
         else:
             # クッキーがまだ読み込まれていない場合は、次のレンダリングで再試行
@@ -168,17 +168,20 @@ def show_video_page():
         else:
             missing_images.append(scene_number)
         
-        # 音声ファイルの検索
+        # 音声ファイルの検索（大文字・小文字両方に対応）
         audio_patterns = [
             f"audio_scene{scene_number:03d}_*.mp3",
-            f"audio_scene{scene_number:03d}_*.wav"
+            f"audio_scene{scene_number:03d}_*.MP3",
+            f"audio_scene{scene_number:03d}_*.wav",
+            f"audio_scene{scene_number:03d}_*.WAV"
         ]
         
         found_audio = None
         for pattern in audio_patterns:
             matches = list(file_manager.audio_dir.glob(pattern))
             if matches:
-                found_audio = matches[0]
+                # 最新のファイルを使用（複数ある場合）
+                found_audio = sorted(matches, key=lambda x: x.stat().st_mtime, reverse=True)[0]
                 break
         
         if found_audio:
@@ -212,7 +215,7 @@ def show_video_page():
     if "video_add_subtitles" not in st.session_state:
         st.session_state.video_add_subtitles = True
     if "video_subtitle_source_idx" not in st.session_state:
-        st.session_state.video_subtitle_source_idx = 0  # 0=見出し, 1=セリフ
+        st.session_state.video_subtitle_source_idx = 1  # 0=見出し, 1=セリフ（デフォルト：セリフ）
     if "video_subtitle_fontsize" not in st.session_state:
         st.session_state.video_subtitle_fontsize = 60
     if "video_subtitle_color" not in st.session_state:
@@ -220,15 +223,22 @@ def show_video_page():
     if "video_subtitle_stroke_color" not in st.session_state:
         st.session_state.video_subtitle_stroke_color = "#000000"
     if "video_subtitle_stroke_width" not in st.session_state:
-        st.session_state.video_subtitle_stroke_width = 2
+        st.session_state.video_subtitle_stroke_width = 3  # デフォルト：3
     if "video_subtitle_bottom_offset" not in st.session_state:
-        st.session_state.video_subtitle_bottom_offset = 50
+        st.session_state.video_subtitle_bottom_offset = 500  # デフォルト：500
     if "video_bg_video_selected" not in st.session_state:
-        st.session_state.video_bg_video_selected = "なし（背景動画を使用しない）"
+        # デフォルト：最新の背景動画を選択
+        bg_videos = file_manager.list_bgvideos()
+        if bg_videos:
+            # 最新のファイルを選択（更新日時でソート済み）
+            latest_bg = sorted(bg_videos, key=lambda x: x.stat().st_mtime, reverse=True)[0]
+            st.session_state.video_bg_video_selected = latest_bg.name
+        else:
+            st.session_state.video_bg_video_selected = "なし（背景動画を使用しない）"
     if "video_enable_animation" not in st.session_state:
-        st.session_state.video_enable_animation = False
+        st.session_state.video_enable_animation = True  # デフォルト：オン
     if "video_animation_scale" not in st.session_state:
-        st.session_state.video_animation_scale = 1.2
+        st.session_state.video_animation_scale = 1.1  # デフォルト：1.1
     
     add_subtitles = st.checkbox(
         "字幕を追加",
@@ -411,17 +421,18 @@ def show_video_page():
         
         video_path = st.session_state.generated_video
         if video_path.exists():
-            # 動画を表示（st.videoを使用）
-            st.video(str(video_path))
-            
-            # 動画情報を表示
-            file_size = video_path.stat().st_size / (1024 * 1024)  # MB
-            st.caption(f"ファイル名: {video_path.name} | サイズ: {file_size:.2f} MB")
-            
-            # ダウンロードボタン
+            # 動画ファイルを読み込み
             with open(video_path, "rb") as f:
                 video_data = f.read()
             
+            # 動画情報を表示
+            file_size = len(video_data) / (1024 * 1024)  # MB
+            st.caption(f"ファイル名: {video_path.name} | サイズ: {file_size:.2f} MB")
+            
+            # 動画を表示（バイトデータを直接渡す）
+            st.video(video_data)
+            
+            # ダウンロードボタン
             st.download_button(
                 label="⬇️ 動画をダウンロード",
                 data=video_data,
