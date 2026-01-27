@@ -2,8 +2,9 @@
 動画編集モジュール
 MoviePyを使用して動画を生成
 """
-from typing import Optional, Dict
+from typing import Optional, Dict, Callable
 from pathlib import Path
+import random
 
 # Pillow 10.0.0以降との互換性パッチ
 try:
@@ -23,6 +24,16 @@ from moviepy.editor import (
 from moviepy.video.fx import resize
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+
+
+# アニメーション効果の定義
+ANIMATION_TYPES = [
+    "zoom_in",      # ゆっくりズームアップ
+    "slide_left",   # 右から左へスライド
+    "slide_right",  # 左から右へスライド
+    "slide_up",     # 下から上へスライド
+    "slide_down",   # 上から下へスライド
+]
 
 from config.config import config
 from config.constants import (
@@ -57,7 +68,9 @@ class VideoEditor:
         subtitle_style: Optional[dict] = None,
         subtitle_source: str = "subtitle",
         subtitle_bottom_offset: int = 50,
-        bg_video_path: Optional[Path] = None
+        bg_video_path: Optional[Path] = None,
+        enable_animation: bool = False,
+        animation_scale: float = 1.2
     ) -> Path:
         """
         台本データから動画を生成
@@ -72,6 +85,8 @@ class VideoEditor:
             subtitle_source: 字幕のソース（"subtitle"=見出し, "dialogue"=セリフ）
             subtitle_bottom_offset: 字幕の下からのオフセット（ピクセル）
             bg_video_path: 背景動画のパス（Noneの場合は背景動画なし）
+            enable_animation: 画像アニメーションを有効にするか
+            animation_scale: アニメーションのスケール（ズーム/移動量）
         
         Returns:
             Path: 生成された動画ファイルのパス
@@ -117,15 +132,31 @@ class VideoEditor:
                 continue
             
             try:
+                # 音声クリップの読み込み（先に読み込んでdurationを取得）
+                audio_clip = AudioFileClip(str(audio_path))
+                actual_duration = audio_clip.duration
+                
                 # 画像クリップの作成
                 image_clip = ImageClip(str(image_path))
-                image_clip = image_clip.resize((self.width, self.height))
                 
-                # 音声クリップの読み込み
-                audio_clip = AudioFileClip(str(audio_path))
+                # アニメーションの適用
+                if enable_animation:
+                    # ランダムにアニメーションタイプを選択
+                    animation_type = random.choice(ANIMATION_TYPES)
+                    logger.info(f"シーン{scene_number}にアニメーション適用: {animation_type}")
+                    
+                    # アニメーション付きクリップを作成
+                    image_clip = self._apply_animation(
+                        image_clip,
+                        animation_type,
+                        actual_duration,
+                        animation_scale
+                    )
+                else:
+                    # アニメーションなしの場合は通常のリサイズ
+                    image_clip = image_clip.resize((self.width, self.height))
                 
                 # 音声の長さに合わせて画像の長さを調整
-                actual_duration = audio_clip.duration
                 image_clip = image_clip.set_duration(actual_duration)
                 
                 # 音声を画像に設定
@@ -144,7 +175,8 @@ class VideoEditor:
                         video_clip = CompositeVideoClip([video_clip, subtitle_clip])
                 
                 video_clips.append(video_clip)
-                logger.info(f"シーン{scene_number}の動画クリップを作成しました（長さ: {actual_duration:.2f}秒）")
+                animation_info = f", アニメーション: {animation_type}" if enable_animation else ""
+                logger.info(f"シーン{scene_number}の動画クリップを作成しました（長さ: {actual_duration:.2f}秒{animation_info}）")
             
             except Exception as e:
                 logger.error(f"シーン{scene_number}の動画クリップ作成に失敗しました: {e}")
@@ -231,6 +263,154 @@ class VideoEditor:
                 clip.close()
             if bg_video_clip is not None:
                 bg_video_clip.close()
+    
+    def _apply_animation(
+        self,
+        clip: ImageClip,
+        animation_type: str,
+        duration: float,
+        scale: float = 1.2
+    ) -> ImageClip:
+        """
+        画像クリップにアニメーション効果を適用
+        
+        Args:
+            clip: 元の画像クリップ
+            animation_type: アニメーションの種類
+            duration: 動画の長さ（秒）
+            scale: スケール係数（ズーム量や移動量に影響）
+        
+        Returns:
+            ImageClip: アニメーション適用後のクリップ
+        """
+        # スケール係数（ズームや移動のために少し大きくする）
+        scaled_width = int(self.width * scale)
+        scaled_height = int(self.height * scale)
+        
+        # 画像を拡大（アニメーション用の余白を確保）
+        clip = clip.resize((scaled_width, scaled_height))
+        
+        # 移動量の計算
+        move_x = (scaled_width - self.width) // 2
+        move_y = (scaled_height - self.height) // 2
+        
+        # 出力サイズ（クロップ後のサイズ）
+        output_width = self.width
+        output_height = self.height
+        
+        if animation_type == "zoom_in":
+            # ゆっくりズームアップ（中央から拡大）
+            def zoom_effect(get_frame, t):
+                # 時間に応じてズーム量を計算（1.0 -> scale）
+                progress = t / duration
+                current_scale = 1.0 + (scale - 1.0) * progress
+                
+                # 現在のフレームを取得
+                frame = get_frame(t)
+                
+                # フレームをPIL Imageに変換
+                img = Image.fromarray(frame)
+                
+                # 現在のスケールに応じてクロップ
+                crop_w = int(output_width / current_scale * scale)
+                crop_h = int(output_height / current_scale * scale)
+                
+                # 中央からクロップ
+                left = (scaled_width - crop_w) // 2
+                top = (scaled_height - crop_h) // 2
+                right = left + crop_w
+                bottom = top + crop_h
+                
+                img = img.crop((left, top, right, bottom))
+                img = img.resize((output_width, output_height), Image.LANCZOS)
+                
+                return np.array(img)
+            
+            return clip.fl(zoom_effect, apply_to=['mask'])
+        
+        elif animation_type == "slide_left":
+            # 右から左へスライド（フレームごとにクロップ）
+            def slide_left_effect(get_frame, t):
+                progress = t / duration
+                offset_x = int(move_x * (1 - 2 * progress))  # 右から左へ
+                
+                frame = get_frame(t)
+                img = Image.fromarray(frame)
+                
+                # オフセットに基づいてクロップ
+                left = move_x - offset_x
+                top = move_y
+                right = left + output_width
+                bottom = top + output_height
+                
+                img = img.crop((left, top, right, bottom))
+                return np.array(img)
+            
+            return clip.fl(slide_left_effect, apply_to=['mask'])
+        
+        elif animation_type == "slide_right":
+            # 左から右へスライド（フレームごとにクロップ）
+            def slide_right_effect(get_frame, t):
+                progress = t / duration
+                offset_x = int(-move_x + move_x * 2 * progress)  # 左から右へ
+                
+                frame = get_frame(t)
+                img = Image.fromarray(frame)
+                
+                # オフセットに基づいてクロップ
+                left = move_x - offset_x
+                top = move_y
+                right = left + output_width
+                bottom = top + output_height
+                
+                img = img.crop((left, top, right, bottom))
+                return np.array(img)
+            
+            return clip.fl(slide_right_effect, apply_to=['mask'])
+        
+        elif animation_type == "slide_up":
+            # 下から上へスライド（フレームごとにクロップ）
+            def slide_up_effect(get_frame, t):
+                progress = t / duration
+                offset_y = int(move_y * (1 - 2 * progress))  # 下から上へ
+                
+                frame = get_frame(t)
+                img = Image.fromarray(frame)
+                
+                # オフセットに基づいてクロップ
+                left = move_x
+                top = move_y - offset_y
+                right = left + output_width
+                bottom = top + output_height
+                
+                img = img.crop((left, top, right, bottom))
+                return np.array(img)
+            
+            return clip.fl(slide_up_effect, apply_to=['mask'])
+        
+        elif animation_type == "slide_down":
+            # 上から下へスライド（フレームごとにクロップ）
+            def slide_down_effect(get_frame, t):
+                progress = t / duration
+                offset_y = int(-move_y + move_y * 2 * progress)  # 上から下へ
+                
+                frame = get_frame(t)
+                img = Image.fromarray(frame)
+                
+                # オフセットに基づいてクロップ
+                left = move_x
+                top = move_y - offset_y
+                right = left + output_width
+                bottom = top + output_height
+                
+                img = img.crop((left, top, right, bottom))
+                return np.array(img)
+            
+            return clip.fl(slide_down_effect, apply_to=['mask'])
+        
+        else:
+            # デフォルト：アニメーションなし
+            return clip.resize((self.width, self.height))
     
     def _create_subtitle_clip(
         self,

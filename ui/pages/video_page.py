@@ -18,16 +18,23 @@ logger = get_logger(__name__)
 
 def get_cookie_manager():
     """クッキーマネージャーを取得"""
-    return stx.CookieManager()
+    # セッションステートでCookieManagerを管理
+    if "cookie_manager" not in st.session_state:
+        st.session_state.cookie_manager = stx.CookieManager(key="video_settings_cookie_manager")
+    return st.session_state.cookie_manager
 
 
 def load_video_settings_from_cookie(cookie_manager):
     """クッキーから設定値を読み込む"""
     settings = {}
     try:
-        cookie_value = cookie_manager.get("video_settings")
-        if cookie_value:
-            settings = json.loads(cookie_value) if isinstance(cookie_value, str) else cookie_value
+        # クッキーを取得（getAllでまとめて取得）
+        all_cookies = cookie_manager.get_all()
+        if all_cookies and "video_settings" in all_cookies:
+            cookie_value = all_cookies["video_settings"]
+            if cookie_value:
+                settings = json.loads(cookie_value) if isinstance(cookie_value, str) else cookie_value
+                logger.debug(f"クッキーから設定を読み込みました: {settings}")
     except Exception as e:
         logger.debug(f"クッキー読み込みエラー: {e}")
     return settings
@@ -36,7 +43,7 @@ def load_video_settings_from_cookie(cookie_manager):
 def save_video_settings_to_cookie(cookie_manager, settings):
     """クッキーに設定値を保存"""
     try:
-        cookie_manager.set("video_settings", json.dumps(settings), expires_at=None)
+        cookie_manager.set("video_settings", json.dumps(settings), key="video_settings_set")
     except Exception as e:
         logger.debug(f"クッキー保存エラー: {e}")
 
@@ -49,9 +56,12 @@ def show_video_page():
     # クッキーマネージャーの初期化
     cookie_manager = get_cookie_manager()
     
-    # クッキーから設定を読み込み（初回のみ）
+    # クッキーから設定を読み込み
+    # 注意: CookieManagerは非同期なので、最初のレンダリングでは値が取得できないことがある
+    saved_settings = load_video_settings_from_cookie(cookie_manager)
+    
+    # クッキーから読み込んだ設定をセッションステートに反映（初回のみ）
     if "video_settings_loaded" not in st.session_state:
-        saved_settings = load_video_settings_from_cookie(cookie_manager)
         if saved_settings:
             st.session_state.video_add_subtitles = saved_settings.get("add_subtitles", True)
             st.session_state.video_subtitle_source_idx = saved_settings.get("subtitle_source_idx", 0)
@@ -61,7 +71,13 @@ def show_video_page():
             st.session_state.video_subtitle_stroke_width = saved_settings.get("stroke_width", 2)
             st.session_state.video_subtitle_bottom_offset = saved_settings.get("bottom_offset", 50)
             st.session_state.video_bg_video_selected = saved_settings.get("bg_video", "なし（背景動画を使用しない）")
-        st.session_state.video_settings_loaded = True
+            st.session_state.video_enable_animation = saved_settings.get("enable_animation", False)
+            st.session_state.video_animation_scale = saved_settings.get("animation_scale", 1.2)
+            st.session_state.video_settings_loaded = True
+        else:
+            # クッキーがまだ読み込まれていない場合は、次のレンダリングで再試行
+            # 何もしない（デフォルト値が使われる）
+            pass
     
     # セッションステートの初期化
     if "video_editor" not in st.session_state:
@@ -209,6 +225,10 @@ def show_video_page():
         st.session_state.video_subtitle_bottom_offset = 50
     if "video_bg_video_selected" not in st.session_state:
         st.session_state.video_bg_video_selected = "なし（背景動画を使用しない）"
+    if "video_enable_animation" not in st.session_state:
+        st.session_state.video_enable_animation = False
+    if "video_animation_scale" not in st.session_state:
+        st.session_state.video_animation_scale = 1.2
     
     add_subtitles = st.checkbox(
         "字幕を追加",
@@ -308,6 +328,34 @@ def show_video_page():
     else:
         st.info("💡 背景動画を使用するには、`output/bgvideos/`フォルダに動画ファイル（MP4等）を配置してください。")
     
+    st.markdown("---")
+    st.subheader("🎞️ 画像アニメーション設定")
+    
+    enable_animation = st.checkbox(
+        "画像アニメーションを有効にする",
+        key="video_enable_animation",
+        help="各シーンの画像にランダムなアニメーション効果（ズーム、スライド）を適用します"
+    )
+    
+    animation_scale = 1.2
+    if enable_animation:
+        st.info("💡 各シーンにランダムで以下のアニメーションが適用されます：\n"
+                "- ゆっくりズームアップ\n"
+                "- 右から左へスライド\n"
+                "- 左から右へスライド\n"
+                "- 上から下へスライド\n"
+                "- 下から上へスライド")
+        
+        animation_scale = st.slider(
+            "アニメーションの強さ",
+            min_value=1.1,
+            max_value=1.5,
+            value=st.session_state.video_animation_scale,
+            step=0.05,
+            key="video_animation_scale",
+            help="値が大きいほどズームや移動量が大きくなります（1.2 = 20%）"
+        )
+    
     # 設定をクッキーに保存
     current_settings = {
         "add_subtitles": st.session_state.video_add_subtitles,
@@ -317,7 +365,9 @@ def show_video_page():
         "stroke_color": st.session_state.video_subtitle_stroke_color,
         "stroke_width": st.session_state.video_subtitle_stroke_width,
         "bottom_offset": st.session_state.video_subtitle_bottom_offset,
-        "bg_video": st.session_state.video_bg_video_selected
+        "bg_video": st.session_state.video_bg_video_selected,
+        "enable_animation": st.session_state.video_enable_animation,
+        "animation_scale": st.session_state.video_animation_scale
     }
     save_video_settings_to_cookie(cookie_manager, current_settings)
     
@@ -336,41 +386,23 @@ def show_video_page():
                     subtitle_style=subtitle_style,
                     subtitle_source=subtitle_source,
                     subtitle_bottom_offset=subtitle_bottom_offset,
-                    bg_video_path=bg_video_path
+                    bg_video_path=bg_video_path,
+                    enable_animation=enable_animation,
+                    animation_scale=animation_scale
                 )
                 
-                st.success(f"✅ 動画を生成しました！")
                 st.session_state.generated_video = video_path
+                st.session_state.video_just_generated = True
                 logger.info(f"動画生成が成功しました: {video_path}")
-                
-                # 動画を表示（サイズを30%に縮小）
-                # Streamlitのst.video()にはwidthパラメータがないため、HTMLで表示
-                with open(video_path, "rb") as video_file:
-                    video_bytes = video_file.read()
-                    import base64
-                    video_base64 = base64.b64encode(video_bytes).decode()
-                    video_html = f"""
-                    <div style="display: flex; justify-content: center; margin: 20px 0;">
-                        <video width="30%" controls style="max-width: 324px;">
-                            <source src="data:video/mp4;base64,{video_base64}" type="video/mp4">
-                        </video>
-                    </div>
-                    """
-                    st.markdown(video_html, unsafe_allow_html=True)
-                
-                # ダウンロードボタン
-                with open(video_path, "rb") as f:
-                    st.download_button(
-                        label="⬇️ 動画をダウンロード",
-                        data=f.read(),
-                        file_name=video_path.name,
-                        mime="video/mp4",
-                        use_container_width=True
-                    )
             
             except Exception as e:
                 st.error(f"❌ 動画生成に失敗しました: {e}")
                 logger.error(f"動画生成エラー: {e}")
+    
+    # 生成完了メッセージ（一度だけ表示）
+    if st.session_state.get("video_just_generated", False):
+        st.success(f"✅ 動画を生成しました！")
+        st.session_state.video_just_generated = False
     
     # 生成済み動画の表示
     if "generated_video" in st.session_state:
@@ -379,19 +411,8 @@ def show_video_page():
         
         video_path = st.session_state.generated_video
         if video_path.exists():
-            # 動画を表示（サイズを30%に縮小）
-            with open(video_path, "rb") as video_file:
-                video_bytes = video_file.read()
-                import base64
-                video_base64 = base64.b64encode(video_bytes).decode()
-                video_html = f"""
-                <div style="display: flex; justify-content: center; margin: 20px 0;">
-                    <video width="30%" controls style="max-width: 324px;">
-                        <source src="data:video/mp4;base64,{video_base64}" type="video/mp4">
-                    </video>
-                </div>
-                """
-                st.markdown(video_html, unsafe_allow_html=True)
+            # 動画を表示（st.videoを使用）
+            st.video(str(video_path))
             
             # 動画情報を表示
             file_size = video_path.stat().st_size / (1024 * 1024)  # MB
@@ -399,13 +420,16 @@ def show_video_page():
             
             # ダウンロードボタン
             with open(video_path, "rb") as f:
-                st.download_button(
-                    label="⬇️ 動画をダウンロード",
-                    data=f.read(),
-                    file_name=video_path.name,
-                    mime="video/mp4",
-                    use_container_width=True
-                )
+                video_data = f.read()
+            
+            st.download_button(
+                label="⬇️ 動画をダウンロード",
+                data=video_data,
+                file_name=video_path.name,
+                mime="video/mp4",
+                use_container_width=True,
+                key="download_generated_video"
+            )
     
     # 保存済み動画の一覧
     st.markdown("---")
