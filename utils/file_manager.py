@@ -23,6 +23,7 @@ class FileManager:
         self.images_dir = config.output_images_dir
         self.videos_dir = config.output_videos_dir
         self.stock_images_dir = config.output_stock_images_dir
+        self.bgvideos_dir = config.output_bgvideos_dir
     
     def save_script(self, script_data: dict, filename: Optional[str] = None) -> Path:
         """
@@ -183,6 +184,19 @@ class FileManager:
         files = []
         for ext in extensions:
             files.extend(self.stock_images_dir.glob(ext))
+        return sorted(files)
+    
+    def list_bgvideos(self) -> list[Path]:
+        """
+        背景動画ファイルのリストを取得
+        
+        Returns:
+            list[Path]: 背景動画ファイルのパスのリスト
+        """
+        extensions = ["*.mp4", "*.MP4", "*.mov", "*.MOV", "*.avi", "*.AVI"]
+        files = []
+        for ext in extensions:
+            files.extend(self.bgvideos_dir.glob(ext))
         return sorted(files)
     
     def ensure_directory_exists(self, directory: Path):

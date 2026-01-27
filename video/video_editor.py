@@ -16,6 +16,7 @@ except ImportError:
 from moviepy.editor import (
     ImageClip,
     AudioFileClip,
+    VideoFileClip,
     CompositeVideoClip,
     concatenate_videoclips
 )
@@ -53,7 +54,10 @@ class VideoEditor:
         audio_files: Dict[str, Path],
         output_filename: Optional[str] = None,
         add_subtitles: bool = True,
-        subtitle_style: Optional[dict] = None
+        subtitle_style: Optional[dict] = None,
+        subtitle_source: str = "subtitle",
+        subtitle_bottom_offset: int = 50,
+        bg_video_path: Optional[Path] = None
     ) -> Path:
         """
         台本データから動画を生成
@@ -65,6 +69,9 @@ class VideoEditor:
             output_filename: 出力ファイル名（Noneの場合は自動生成）
             add_subtitles: 字幕を追加するか
             subtitle_style: 字幕のスタイル設定
+            subtitle_source: 字幕のソース（"subtitle"=見出し, "dialogue"=セリフ）
+            subtitle_bottom_offset: 字幕の下からのオフセット（ピクセル）
+            bg_video_path: 背景動画のパス（Noneの場合は背景動画なし）
         
         Returns:
             Path: 生成された動画ファイルのパス
@@ -94,7 +101,8 @@ class VideoEditor:
             scene_number = scene.get("scene_number")
             scene_key = str(scene_number)
             duration = scene.get("duration", 3.0)
-            subtitle_text = scene.get("subtitle", "")
+            # 字幕のソースに応じてテキストを取得
+            subtitle_text = scene.get(subtitle_source, "")
             
             # 画像ファイルの取得
             image_path = image_files.get(scene_key)
@@ -128,7 +136,8 @@ class VideoEditor:
                     subtitle_clip = self._create_subtitle_clip(
                         subtitle_text,
                         actual_duration,
-                        subtitle_style
+                        subtitle_style,
+                        subtitle_bottom_offset
                     )
                     # 字幕クリップが正常に作成された場合のみ合成
                     if subtitle_clip is not None:
@@ -147,6 +156,45 @@ class VideoEditor:
         # すべてのクリップを結合
         logger.info(f"{len(video_clips)}個のクリップを結合します")
         final_video = concatenate_videoclips(video_clips, method="compose")
+        
+        # 背景動画の合成
+        bg_video_clip = None
+        if bg_video_path and bg_video_path.exists():
+            try:
+                logger.info(f"背景動画を読み込みます: {bg_video_path}")
+                bg_video_clip = VideoFileClip(str(bg_video_path))
+                
+                # 背景動画をリサイズ
+                bg_video_clip = bg_video_clip.resize((self.width, self.height))
+                
+                # 最終動画の長さを取得
+                total_duration = final_video.duration
+                
+                # 背景動画をループさせて必要な長さにする
+                if bg_video_clip.duration < total_duration:
+                    # ループ回数を計算
+                    loop_count = int(total_duration / bg_video_clip.duration) + 1
+                    logger.info(f"背景動画をループします（{loop_count}回）")
+                    
+                    # ループさせた背景動画を作成
+                    bg_clips = [bg_video_clip] * loop_count
+                    bg_video_looped = concatenate_videoclips(bg_clips)
+                    bg_video_looped = bg_video_looped.subclip(0, total_duration)
+                else:
+                    # 背景動画が十分長い場合はそのまま使用
+                    bg_video_looped = bg_video_clip.subclip(0, total_duration)
+                
+                # 背景動画の音声を削除（元の音声を保持するため）
+                bg_video_looped = bg_video_looped.without_audio()
+                
+                # 背景動画の上にメイン動画を合成
+                logger.info("背景動画とメイン動画を合成します")
+                final_video = CompositeVideoClip([bg_video_looped, final_video])
+                
+            except Exception as e:
+                logger.error(f"背景動画の処理に失敗しました: {e}")
+                # 背景動画の処理に失敗しても、元の動画は生成する
+                logger.warning("背景動画なしで動画を生成します")
         
         # 出力ファイル名の生成
         if output_filename is None:
@@ -181,12 +229,15 @@ class VideoEditor:
             final_video.close()
             for clip in video_clips:
                 clip.close()
+            if bg_video_clip is not None:
+                bg_video_clip.close()
     
     def _create_subtitle_clip(
         self,
         text: str,
         duration: float,
-        style: dict
+        style: dict,
+        bottom_offset: int = 50
     ) -> Optional[ImageClip]:
         """
         字幕クリップを作成（PILを使用）
@@ -195,6 +246,7 @@ class VideoEditor:
             text: 字幕テキスト
             duration: 字幕の表示時間（秒）
             style: 字幕のスタイル設定
+            bottom_offset: 下からのオフセット（ピクセル）
         
         Returns:
             ImageClip: 字幕クリップ
@@ -319,7 +371,9 @@ class VideoEditor:
             # ImageClipを作成
             subtitle_clip = ImageClip(img_array)
             subtitle_clip = subtitle_clip.set_duration(duration)
-            subtitle_clip = subtitle_clip.set_position(("center", "bottom"))
+            # 下からのオフセットを考慮した位置を計算
+            y_position = self.height - img_height - bottom_offset
+            subtitle_clip = subtitle_clip.set_position(("center", y_position))
             
             logger.info(f"字幕クリップを作成しました（テキスト: {text[:30]}...）")
             return subtitle_clip

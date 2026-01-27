@@ -2,8 +2,11 @@
 動画編集ページ
 """
 import streamlit as st
+import json
 from pathlib import Path
 from typing import Dict
+
+import extra_streamlit_components as stx
 
 from video.video_editor import VideoEditor
 from utils.file_manager import file_manager
@@ -13,10 +16,52 @@ from config.constants import VIDEO_WIDTH
 logger = get_logger(__name__)
 
 
+def get_cookie_manager():
+    """クッキーマネージャーを取得"""
+    return stx.CookieManager()
+
+
+def load_video_settings_from_cookie(cookie_manager):
+    """クッキーから設定値を読み込む"""
+    settings = {}
+    try:
+        cookie_value = cookie_manager.get("video_settings")
+        if cookie_value:
+            settings = json.loads(cookie_value) if isinstance(cookie_value, str) else cookie_value
+    except Exception as e:
+        logger.debug(f"クッキー読み込みエラー: {e}")
+    return settings
+
+
+def save_video_settings_to_cookie(cookie_manager, settings):
+    """クッキーに設定値を保存"""
+    try:
+        cookie_manager.set("video_settings", json.dumps(settings), expires_at=None)
+    except Exception as e:
+        logger.debug(f"クッキー保存エラー: {e}")
+
+
 def show_video_page():
     """動画編集ページを表示"""
     st.header("🎬 動画編集")
     st.markdown("---")
+    
+    # クッキーマネージャーの初期化
+    cookie_manager = get_cookie_manager()
+    
+    # クッキーから設定を読み込み（初回のみ）
+    if "video_settings_loaded" not in st.session_state:
+        saved_settings = load_video_settings_from_cookie(cookie_manager)
+        if saved_settings:
+            st.session_state.video_add_subtitles = saved_settings.get("add_subtitles", True)
+            st.session_state.video_subtitle_source_idx = saved_settings.get("subtitle_source_idx", 0)
+            st.session_state.video_subtitle_fontsize = saved_settings.get("fontsize", 60)
+            st.session_state.video_subtitle_color = saved_settings.get("color", "#FFFFFF")
+            st.session_state.video_subtitle_stroke_color = saved_settings.get("stroke_color", "#000000")
+            st.session_state.video_subtitle_stroke_width = saved_settings.get("stroke_width", 2)
+            st.session_state.video_subtitle_bottom_offset = saved_settings.get("bottom_offset", 50)
+            st.session_state.video_bg_video_selected = saved_settings.get("bg_video", "なし（背景動画を使用しない）")
+        st.session_state.video_settings_loaded = True
     
     # セッションステートの初期化
     if "video_editor" not in st.session_state:
@@ -147,19 +192,79 @@ def show_video_page():
     st.markdown("---")
     st.subheader("🎨 動画生成設定")
     
+    # セッションステートの初期化（設定値の保持用）
+    if "video_add_subtitles" not in st.session_state:
+        st.session_state.video_add_subtitles = True
+    if "video_subtitle_source_idx" not in st.session_state:
+        st.session_state.video_subtitle_source_idx = 0  # 0=見出し, 1=セリフ
+    if "video_subtitle_fontsize" not in st.session_state:
+        st.session_state.video_subtitle_fontsize = 60
+    if "video_subtitle_color" not in st.session_state:
+        st.session_state.video_subtitle_color = "#FFFFFF"
+    if "video_subtitle_stroke_color" not in st.session_state:
+        st.session_state.video_subtitle_stroke_color = "#000000"
+    if "video_subtitle_stroke_width" not in st.session_state:
+        st.session_state.video_subtitle_stroke_width = 2
+    if "video_subtitle_bottom_offset" not in st.session_state:
+        st.session_state.video_subtitle_bottom_offset = 50
+    if "video_bg_video_selected" not in st.session_state:
+        st.session_state.video_bg_video_selected = "なし（背景動画を使用しない）"
+    
     add_subtitles = st.checkbox(
         "字幕を追加",
-        value=True,
+        key="video_add_subtitles",
         help="各シーンの字幕を動画に追加します"
     )
     
-    # 字幕スタイル設定
+    # 字幕設定
+    subtitle_source = "subtitle"
+    subtitle_bottom_offset = st.session_state.video_subtitle_bottom_offset
+    subtitle_style = None
+    
     if add_subtitles:
+        # 字幕内容の選択
+        subtitle_options = ["見出し（subtitle）", "セリフ（dialogue）"]
+        subtitle_source_option = st.radio(
+            "字幕の内容",
+            options=subtitle_options,
+            index=st.session_state.video_subtitle_source_idx,
+            horizontal=True,
+            help="字幕に表示するテキストの種類を選択します"
+        )
+        # 選択結果を保存
+        st.session_state.video_subtitle_source_idx = subtitle_options.index(subtitle_source_option)
+        subtitle_source = "subtitle" if "見出し" in subtitle_source_option else "dialogue"
+        
         with st.expander("字幕スタイル設定"):
-            subtitle_fontsize = st.slider("フォントサイズ", 30, 100, 60)
-            subtitle_color = st.color_picker("文字色", "#FFFFFF")
-            subtitle_stroke_color = st.color_picker("縁取り色", "#000000")
-            subtitle_stroke_width = st.slider("縁取りの太さ", 0, 5, 2)
+            subtitle_fontsize = st.slider(
+                "フォントサイズ",
+                30, 100,
+                key="video_subtitle_fontsize"
+            )
+            subtitle_color = st.color_picker(
+                "文字色",
+                key="video_subtitle_color"
+            )
+            subtitle_stroke_color = st.color_picker(
+                "縁取り色",
+                key="video_subtitle_stroke_color"
+            )
+            subtitle_stroke_width = st.slider(
+                "縁取りの太さ",
+                0, 5,
+                key="video_subtitle_stroke_width"
+            )
+            
+            st.markdown("---")
+            st.markdown("**字幕の位置**")
+            subtitle_bottom_offset = st.slider(
+                "下からの位置（ピクセル）",
+                min_value=0,
+                max_value=500,
+                step=10,
+                key="video_subtitle_bottom_offset",
+                help="値が大きいほど字幕が上に移動します（0=画面最下部）"
+            )
             
             subtitle_style = {
                 "fontsize": subtitle_fontsize,
@@ -171,8 +276,50 @@ def show_video_page():
                 "size": (VIDEO_WIDTH - 100, None),
                 "align": "center"
             }
+    
+    st.markdown("---")
+    st.subheader("🎥 背景動画設定")
+    
+    # 背景動画の選択
+    bg_video_files = file_manager.list_bgvideos()
+    bg_video_path = None
+    
+    if bg_video_files:
+        bg_video_options = ["なし（背景動画を使用しない）"] + [f.name for f in bg_video_files]
+        
+        # 保存された選択が有効か確認
+        saved_selection = st.session_state.video_bg_video_selected
+        if saved_selection not in bg_video_options:
+            saved_selection = "なし（背景動画を使用しない）"
+            st.session_state.video_bg_video_selected = saved_selection
+        
+        selected_bg_video = st.selectbox(
+            "背景動画を選択",
+            options=bg_video_options,
+            index=bg_video_options.index(saved_selection),
+            help="動画の背景でループ再生する動画を選択します。`output/bgvideos/`フォルダに動画を配置してください。"
+        )
+        # 選択結果を保存
+        st.session_state.video_bg_video_selected = selected_bg_video
+        
+        if selected_bg_video != "なし（背景動画を使用しない）":
+            bg_video_path = file_manager.bgvideos_dir / selected_bg_video
+            st.info(f"✅ 背景動画: {selected_bg_video}")
     else:
-        subtitle_style = None
+        st.info("💡 背景動画を使用するには、`output/bgvideos/`フォルダに動画ファイル（MP4等）を配置してください。")
+    
+    # 設定をクッキーに保存
+    current_settings = {
+        "add_subtitles": st.session_state.video_add_subtitles,
+        "subtitle_source_idx": st.session_state.video_subtitle_source_idx,
+        "fontsize": st.session_state.video_subtitle_fontsize,
+        "color": st.session_state.video_subtitle_color,
+        "stroke_color": st.session_state.video_subtitle_stroke_color,
+        "stroke_width": st.session_state.video_subtitle_stroke_width,
+        "bottom_offset": st.session_state.video_subtitle_bottom_offset,
+        "bg_video": st.session_state.video_bg_video_selected
+    }
+    save_video_settings_to_cookie(cookie_manager, current_settings)
     
     st.markdown("---")
     st.subheader("🎬 動画生成")
@@ -186,7 +333,10 @@ def show_video_page():
                     image_files=image_files,
                     audio_files=audio_files,
                     add_subtitles=add_subtitles,
-                    subtitle_style=subtitle_style
+                    subtitle_style=subtitle_style,
+                    subtitle_source=subtitle_source,
+                    subtitle_bottom_offset=subtitle_bottom_offset,
+                    bg_video_path=bg_video_path
                 )
                 
                 st.success(f"✅ 動画を生成しました！")
