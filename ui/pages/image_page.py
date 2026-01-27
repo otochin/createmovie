@@ -2,7 +2,10 @@
 画像生成ページ
 """
 import streamlit as st
+import shutil
+import random
 from pathlib import Path
+from datetime import datetime
 
 from images.image_generator import ImageGenerator
 from images.image_processor import ImageProcessor
@@ -149,7 +152,7 @@ def show_image_page():
     st.subheader("🖼️ 画像生成")
     
     # 全シーン一括生成
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         if st.button("🚀 全シーンの画像を生成", use_container_width=True):
             with st.spinner("画像を生成中..."):
@@ -170,6 +173,47 @@ def show_image_page():
                     logger.error(f"画像生成エラー: {e}")
     
     with col2:
+        if st.button("📂 ストック画像を紐づける", use_container_width=True):
+            # ストック画像の取得
+            stock_images = file_manager.list_stock_images()
+            
+            if not stock_images:
+                st.error("❌ ストック画像がありません。`output/stock_images/` フォルダに画像を配置してください。")
+            elif len(stock_images) < len(scenes):
+                st.error(f"❌ ストック画像が足りません。シーン数: {len(scenes)}、ストック画像数: {len(stock_images)}")
+            else:
+                with st.spinner("ストック画像を紐づけ中..."):
+                    try:
+                        # ランダムにシャッフル
+                        shuffled_images = random.sample(stock_images, len(scenes))
+                        
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        assigned_images = {}
+                        
+                        for i, scene in enumerate(scenes):
+                            scene_number = scene.get("scene_number")
+                            stock_image_path = shuffled_images[i]
+                            
+                            # 新しいファイル名を生成（拡張子は小文字に統一）
+                            extension = stock_image_path.suffix.lower()
+                            new_filename = f"image_scene{scene_number:03d}_{timestamp}{extension}"
+                            new_path = file_manager.images_dir / new_filename
+                            
+                            # 画像をコピー
+                            shutil.copy2(stock_image_path, new_path)
+                            
+                            assigned_images[str(scene_number)] = new_path
+                        
+                        st.session_state.generated_images = assigned_images
+                        st.success(f"✅ {len(assigned_images)}個のストック画像を紐づけました！")
+                        logger.info(f"ストック画像の紐づけが成功しました: {len(assigned_images)}個のファイル")
+                        st.rerun()
+                    
+                    except Exception as e:
+                        st.error(f"❌ ストック画像の紐づけに失敗しました: {e}")
+                        logger.error(f"ストック画像紐づけエラー: {e}")
+    
+    with col3:
         if st.button("🔄 クリア", use_container_width=True):
             st.session_state.generated_images = {}
             st.rerun()
@@ -229,24 +273,31 @@ def show_image_page():
         st.markdown("---")
         st.subheader("📁 生成された画像ファイル")
         
-        for scene_key, image_path in st.session_state.generated_images.items():
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.markdown(f"**シーン {scene_key}**: {image_path.name}")
-                st.image(str(image_path), use_container_width=True)
+        # 3列で表示（サムネイル形式）
+        cols = st.columns(3)
+        for idx, (scene_key, image_path) in enumerate(st.session_state.generated_images.items()):
+            with cols[idx % 3]:
+                st.markdown(f"**シーン {scene_key}**")
+                
+                # サムネイル表示（約30%サイズ、幅200px程度）
+                st.image(str(image_path), width=200)
                 
                 # 画像情報を表示
                 processor = ImageProcessor()
                 width, height = processor.get_image_size(image_path)
-                st.caption(f"サイズ: {width}x{height}")
-            
-            with col2:
+                st.caption(f"{image_path.name}\n({width}x{height})")
+                
+                # 拡大表示用のexpander
+                with st.expander("🔍 拡大表示"):
+                    st.image(str(image_path), use_container_width=True)
+                
                 # ダウンロードボタン
                 with open(image_path, "rb") as f:
                     st.download_button(
-                        label="⬇️",
+                        label="⬇️ ダウンロード",
                         data=f.read(),
                         file_name=image_path.name,
                         mime=f"image/{image_path.suffix[1:]}",
-                        key=f"download_{scene_key}"
+                        key=f"download_{scene_key}",
+                        use_container_width=True
                     )

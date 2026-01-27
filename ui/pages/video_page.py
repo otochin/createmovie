@@ -84,18 +84,22 @@ def show_video_page():
         scene_number = scene.get("scene_number")
         scene_key = str(scene_number)
         
-        # 画像ファイルの検索
+        # 画像ファイルの検索（大文字・小文字両方に対応）
         image_patterns = [
             f"image_scene{scene_number:03d}_*.png",
+            f"image_scene{scene_number:03d}_*.PNG",
             f"image_scene{scene_number:03d}_*.jpg",
-            f"image_scene{scene_number:03d}_*.jpeg"
+            f"image_scene{scene_number:03d}_*.JPG",
+            f"image_scene{scene_number:03d}_*.jpeg",
+            f"image_scene{scene_number:03d}_*.JPEG"
         ]
         
         found_image = None
         for pattern in image_patterns:
             matches = list(file_manager.images_dir.glob(pattern))
             if matches:
-                found_image = matches[0]
+                # 最新のファイルを使用（複数ある場合）
+                found_image = sorted(matches, key=lambda x: x.stat().st_mtime, reverse=True)[0]
                 break
         
         if found_image:

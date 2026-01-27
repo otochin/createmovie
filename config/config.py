@@ -57,6 +57,7 @@ class Config:
         self.output_audio_dir = self.output_dir / "audio"
         self.output_images_dir = self.output_dir / "images"
         self.output_videos_dir = self.output_dir / "videos"
+        self.output_stock_images_dir = self.output_dir / "stock_images"
         
         # ログ設定
         self.log_dir = Path(os.getenv("LOG_DIR", str(LOG_DIR)))
@@ -73,6 +74,7 @@ class Config:
             self.output_audio_dir,
             self.output_images_dir,
             self.output_videos_dir,
+            self.output_stock_images_dir,
             self.log_dir,
         ]
         for directory in directories:

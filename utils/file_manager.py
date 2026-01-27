@@ -22,6 +22,7 @@ class FileManager:
         self.audio_dir = config.output_audio_dir
         self.images_dir = config.output_images_dir
         self.videos_dir = config.output_videos_dir
+        self.stock_images_dir = config.output_stock_images_dir
     
     def save_script(self, script_data: dict, filename: Optional[str] = None) -> Path:
         """
@@ -170,6 +171,19 @@ class FileManager:
             list[Path]: 動画ファイルのパスのリスト
         """
         return sorted(self.videos_dir.glob("*.mp4"), reverse=True)
+    
+    def list_stock_images(self) -> list[Path]:
+        """
+        ストック画像ファイルのリストを取得
+        
+        Returns:
+            list[Path]: ストック画像ファイルのパスのリスト
+        """
+        extensions = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"]
+        files = []
+        for ext in extensions:
+            files.extend(self.stock_images_dir.glob(ext))
+        return sorted(files)
     
     def ensure_directory_exists(self, directory: Path):
         """
