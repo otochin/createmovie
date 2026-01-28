@@ -404,6 +404,9 @@ def show_video_page():
                 st.session_state.generated_video = video_path
                 st.session_state.video_just_generated = True
                 logger.info(f"動画生成が成功しました: {video_path}")
+                
+                # 動画生成完了後にリランして表示を更新
+                st.rerun()
             
             except Exception as e:
                 st.error(f"❌ 動画生成に失敗しました: {e}")
@@ -429,8 +432,8 @@ def show_video_page():
             file_size = len(video_data) / (1024 * 1024)  # MB
             st.caption(f"ファイル名: {video_path.name} | サイズ: {file_size:.2f} MB")
             
-            # 動画を表示（バイトデータを直接渡す）
-            st.video(video_data)
+            # 動画を表示（バイトデータを直接渡す、formatを明示）
+            st.video(video_data, format="video/mp4")
             
             # ダウンロードボタン
             st.download_button(
