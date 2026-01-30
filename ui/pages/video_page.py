@@ -3,6 +3,7 @@
 """
 import streamlit as st
 import json
+import random
 from pathlib import Path
 from typing import Dict
 
@@ -73,6 +74,8 @@ def show_video_page():
             st.session_state.video_bg_video_selected = saved_settings.get("bg_video", "なし（背景動画を使用しない）")
             st.session_state.video_enable_animation = saved_settings.get("enable_animation", True)  # デフォルト：オン
             st.session_state.video_animation_scale = saved_settings.get("animation_scale", 1.1)  # デフォルト：1.1
+            st.session_state.video_animation_mode = saved_settings.get("animation_mode", "individual")  # デフォルト：個別指定
+            st.session_state.video_animation_types = saved_settings.get("animation_types", {})  # 個別アニメーション設定
             st.session_state.video_settings_loaded = True
         else:
             # クッキーがまだ読み込まれていない場合は、次のレンダリングで再試行
@@ -111,13 +114,47 @@ def show_video_page():
         # 台本を読み込み
         try:
             script_data = file_manager.load_script(selected_script_path)
+            
+            # 台本データの検証
+            if not isinstance(script_data, dict):
+                st.error(f"❌ 台本データの形式が正しくありません。型: {type(script_data)}")
+                logger.error(f"台本データの型が不正です: {type(script_data)}")
+                return
+            
+            # scenesキーの存在確認
+            if "scenes" not in script_data:
+                st.error("❌ 台本データに'scenes'キーがありません。")
+                st.info(f"**デバッグ情報**: 台本データのキー: {list(script_data.keys())}")
+                logger.error(f"台本データに'scenes'キーがありません。キー: {list(script_data.keys())}")
+                return
+            
+            scenes_list = script_data.get("scenes", [])
+            if not isinstance(scenes_list, list):
+                st.error(f"❌ 'scenes'の型が正しくありません。型: {type(scenes_list)}")
+                logger.error(f"'scenes'の型が不正です: {type(scenes_list)}")
+                return
+            
+            if len(scenes_list) == 0:
+                st.warning("⚠️ 台本にシーンが含まれていません。")
+                logger.warning("台本にシーンが含まれていません")
+                return
+            
             st.session_state.current_script = script_data
             
+            # 画像マッピング情報を読み込み（存在する場合）
+            script_name = selected_script_name.replace(".json", "")
+            image_mapping = file_manager.load_image_mapping(script_name)
+            if image_mapping:
+                st.session_state.image_mapping = image_mapping
+            else:
+                st.session_state.image_mapping = None
+            
             # 台本情報を表示
-            st.info(f"**タイトル**: {script_data.get('title', 'タイトルなし')} | **シーン数**: {len(script_data.get('scenes', []))}")
+            st.info(f"**タイトル**: {script_data.get('title', 'タイトルなし')} | **シーン数**: {len(scenes_list)}")
         
         except Exception as e:
-            st.error(f"台本の読み込みに失敗しました: {e}")
+            st.error(f"❌ 台本の読み込みに失敗しました: {e}")
+            logger.error(f"台本の読み込みエラー: {e}", exc_info=True)
             return
     
     # セッションステートに台本がない場合は終了
@@ -125,10 +162,22 @@ def show_video_page():
         return
     
     script_data = st.session_state.current_script
+    
+    # デバッグ情報：台本データの構造を確認
+    if not isinstance(script_data, dict):
+        st.error(f"❌ 台本データの形式が正しくありません。型: {type(script_data)}")
+        logger.error(f"台本データの型が不正です: {type(script_data)}")
+        return
+    
     scenes = script_data.get("scenes", [])
     
     if not scenes:
-        st.warning("台本にシーンがありません。")
+        # より詳細なエラーメッセージを表示
+        st.warning("⚠️ 台本にシーンがありません。")
+        st.info(f"**デバッグ情報**: 台本データのキー: {list(script_data.keys())}")
+        if "scenes" in script_data:
+            st.info(f"**デバッグ情報**: scenesの値: {script_data['scenes']} (型: {type(script_data['scenes'])})")
+        logger.warning(f"台本にシーンがありません。台本データのキー: {list(script_data.keys())}")
         return
     
     st.markdown("---")
@@ -145,23 +194,30 @@ def show_video_page():
         scene_number = scene.get("scene_number")
         scene_key = str(scene_number)
         
-        # 画像ファイルの検索（大文字・小文字両方に対応）
-        image_patterns = [
-            f"image_scene{scene_number:03d}_*.png",
-            f"image_scene{scene_number:03d}_*.PNG",
-            f"image_scene{scene_number:03d}_*.jpg",
-            f"image_scene{scene_number:03d}_*.JPG",
-            f"image_scene{scene_number:03d}_*.jpeg",
-            f"image_scene{scene_number:03d}_*.JPEG"
-        ]
-        
+        # まず画像マッピング情報から検索（画像生成画面で割り当てた画像を優先）
         found_image = None
-        for pattern in image_patterns:
-            matches = list(file_manager.images_dir.glob(pattern))
-            if matches:
-                # 最新のファイルを使用（複数ある場合）
-                found_image = sorted(matches, key=lambda x: x.stat().st_mtime, reverse=True)[0]
-                break
+        if st.session_state.get("image_mapping") and scene_key in st.session_state.image_mapping:
+            mapped_image_path = st.session_state.image_mapping[scene_key]
+            if mapped_image_path.exists():
+                found_image = mapped_image_path
+        
+        # マッピング情報にない場合は、ファイル検索で探す
+        if not found_image:
+            image_patterns = [
+                f"image_scene{scene_number:03d}_*.png",
+                f"image_scene{scene_number:03d}_*.PNG",
+                f"image_scene{scene_number:03d}_*.jpg",
+                f"image_scene{scene_number:03d}_*.JPG",
+                f"image_scene{scene_number:03d}_*.jpeg",
+                f"image_scene{scene_number:03d}_*.JPEG"
+            ]
+            
+            for pattern in image_patterns:
+                matches = list(file_manager.images_dir.glob(pattern))
+                if matches:
+                    # 最新のファイルを使用（複数ある場合）
+                    found_image = sorted(matches, key=lambda x: x.stat().st_mtime, reverse=True)[0]
+                    break
         
         if found_image:
             image_files[scene_key] = found_image
@@ -239,9 +295,14 @@ def show_video_page():
         st.session_state.video_enable_animation = True  # デフォルト：オン
     if "video_animation_scale" not in st.session_state:
         st.session_state.video_animation_scale = 1.1  # デフォルト：1.1
+    if "video_animation_mode" not in st.session_state:
+        st.session_state.video_animation_mode = "individual"  # デフォルト：個別指定
+    if "video_animation_types" not in st.session_state:
+        st.session_state.video_animation_types = {}  # {シーン番号: アニメーションタイプ}
     
     add_subtitles = st.checkbox(
         "字幕を追加",
+        value=st.session_state.video_add_subtitles,
         key="video_add_subtitles",
         help="各シーンの字幕を動画に追加します"
     )
@@ -344,17 +405,24 @@ def show_video_page():
     enable_animation = st.checkbox(
         "画像アニメーションを有効にする",
         key="video_enable_animation",
-        help="各シーンの画像にランダムなアニメーション効果（ズーム、スライド）を適用します"
+        help="各シーンの画像にアニメーション効果（ズーム、スライド）を適用します"
     )
     
     animation_scale = 1.2
+    animation_types = None
+    
     if enable_animation:
-        st.info("💡 各シーンにランダムで以下のアニメーションが適用されます：\n"
-                "- ゆっくりズームアップ\n"
-                "- 右から左へスライド\n"
-                "- 左から右へスライド\n"
-                "- 上から下へスライド\n"
-                "- 下から上へスライド")
+        # アニメーションモードの選択
+        animation_mode_options = ["ランダム", "個別指定"]
+        animation_mode_idx = 0 if st.session_state.video_animation_mode == "random" else 1
+        animation_mode = st.radio(
+            "アニメーションの適用方法",
+            options=animation_mode_options,
+            index=animation_mode_idx,
+            horizontal=True,
+            help="ランダム：各シーンにランダムにアニメーションを適用\n個別指定：各シーンごとにアニメーションを個別に指定"
+        )
+        st.session_state.video_animation_mode = "random" if animation_mode == "ランダム" else "individual"
         
         animation_scale = st.slider(
             "アニメーションの強さ",
@@ -363,8 +431,124 @@ def show_video_page():
             value=st.session_state.video_animation_scale,
             step=0.05,
             key="video_animation_scale",
-            help="値が大きいほどズームや移動量が大きくなります（1.2 = 20%）"
+            help="値が大きいほどズームや移動量が大きくなります（1.1 = 10%）"
         )
+        
+        # 個別指定モードの場合
+        if st.session_state.video_animation_mode == "individual":
+            st.markdown("---")
+            
+            # アニメーションタイプの選択肢
+            animation_type_options = {
+                "なし": None,
+                "ゆっくりズームアップ": "zoom_in",
+                "右から左へスライド": "slide_left",
+                "左から右へスライド": "slide_right",
+                "上から下へスライド": "slide_up",
+                "下から上へスライド": "slide_down"
+            }
+            
+            # アニメーションタイプの値のみ（「なし」を除く）
+            animation_type_values = ["zoom_in", "slide_left", "slide_right", "slide_up", "slide_down"]
+            
+            # 各シーンごとにアニメーションを選択
+            animation_types = {}
+            
+            # 各シーンに対して設定がない場合のみランダムに初期値を設定（連続しないように）
+            previous_animation = None
+            for scene in scenes:
+                scene_number = scene.get("scene_number")
+                scene_key = str(scene_number)
+                # 設定がない場合のみランダムにアニメーションタイプを設定
+                if scene_key not in st.session_state.video_animation_types:
+                    # 前のシーンのアニメーションを除外したリストから選択
+                    available_animations = [
+                        anim for anim in animation_type_values 
+                        if anim != previous_animation
+                    ]
+                    # 前のシーンと同じアニメーションしか残っていない場合は全種類から選択
+                    if not available_animations:
+                        available_animations = animation_type_values
+                    
+                    random_animation = random.choice(available_animations)
+                    st.session_state.video_animation_types[scene_key] = random_animation
+                    previous_animation = random_animation
+                else:
+                    # 既に設定されている場合は、それを前のアニメーションとして記録
+                    previous_animation = st.session_state.video_animation_types[scene_key]
+            
+            # Expanderで折りたたみ可能にする
+            with st.expander("📋 各シーンのアニメーション設定", expanded=True):
+                # 3列レイアウトで表示（シーンを3つずつのグループに分ける）
+                num_cols = 3
+                
+                # シーンを3つずつのグループに分ける
+                for group_start in range(0, len(scenes), num_cols):
+                    group_scenes = scenes[group_start:group_start + num_cols]
+                    cols = st.columns(num_cols)
+                    
+                    for col_idx, scene in enumerate(group_scenes):
+                        scene_number = scene.get("scene_number")
+                        scene_key = str(scene_number)
+                        
+                        with cols[col_idx]:
+                            # シーン番号を表示
+                            st.markdown(f"### シーン {scene_number}")
+                            
+                            # 画像を表示（約15%サイズ：324pxの半分 = 162px）
+                            scene_image_path = image_files.get(scene_key)
+                            if scene_image_path and scene_image_path.exists():
+                                # 画像を読み込んで表示（約15%サイズ：1080 * 0.15 = 162px）
+                                st.image(
+                                    str(scene_image_path),
+                                    caption=f"シーン{scene_number}の画像",
+                                    width=162
+                                )
+                            else:
+                                st.warning(f"シーン{scene_number}の画像が見つかりません")
+                            
+                            # 現在の設定を取得（既にランダムに設定済み）
+                            current_animation = st.session_state.video_animation_types.get(scene_key, None)
+                            current_option = None
+                            for option_name, option_value in animation_type_options.items():
+                                if option_value == current_animation:
+                                    current_option = option_name
+                                    break
+                            if current_option is None:
+                                # 設定がない場合は「なし」をデフォルトに（通常は発生しない）
+                                current_option = "なし"
+                            
+                            # セレクトボックスで選択
+                            selected_option = st.selectbox(
+                                f"アニメーション",
+                                options=list(animation_type_options.keys()),
+                                index=list(animation_type_options.keys()).index(current_option),
+                                key=f"animation_scene_{scene_number}",
+                                help=f"シーン{scene_number}に適用するアニメーションを選択"
+                            )
+                            
+                            selected_animation_type = animation_type_options[selected_option]
+                            if selected_animation_type:
+                                animation_types[scene_key] = selected_animation_type
+                                st.session_state.video_animation_types[scene_key] = selected_animation_type
+                            else:
+                                # 「なし」が選択された場合は辞書から削除
+                                if scene_key in st.session_state.video_animation_types:
+                                    del st.session_state.video_animation_types[scene_key]
+                            
+                            st.markdown("---")  # 区切り線
+                    
+                    # グループ間にスペースを追加（最後のグループ以外）
+                    if group_start + num_cols < len(scenes):
+                        st.markdown("<br>", unsafe_allow_html=True)
+        else:
+            # ランダムモードの場合
+            st.info("💡 各シーンにランダムで以下のアニメーションが適用されます：\n"
+                    "- ゆっくりズームアップ\n"
+                    "- 右から左へスライド\n"
+                    "- 左から右へスライド\n"
+                    "- 上から下へスライド\n"
+                    "- 下から上へスライド")
     
     # 設定をクッキーに保存
     current_settings = {
@@ -377,7 +561,9 @@ def show_video_page():
         "bottom_offset": st.session_state.video_subtitle_bottom_offset,
         "bg_video": st.session_state.video_bg_video_selected,
         "enable_animation": st.session_state.video_enable_animation,
-        "animation_scale": st.session_state.video_animation_scale
+        "animation_scale": st.session_state.video_animation_scale,
+        "animation_mode": st.session_state.video_animation_mode,
+        "animation_types": st.session_state.video_animation_types
     }
     save_video_settings_to_cookie(cookie_manager, current_settings)
     
@@ -398,7 +584,8 @@ def show_video_page():
                     subtitle_bottom_offset=subtitle_bottom_offset,
                     bg_video_path=bg_video_path,
                     enable_animation=enable_animation,
-                    animation_scale=animation_scale
+                    animation_scale=animation_scale,
+                    animation_types=animation_types if enable_animation else None
                 )
                 
                 st.session_state.generated_video = video_path

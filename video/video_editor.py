@@ -70,7 +70,8 @@ class VideoEditor:
         subtitle_bottom_offset: int = 50,
         bg_video_path: Optional[Path] = None,
         enable_animation: bool = False,
-        animation_scale: float = 1.2
+        animation_scale: float = 1.2,
+        animation_types: Optional[Dict[str, str]] = None
     ) -> Path:
         """
         台本データから動画を生成
@@ -87,6 +88,7 @@ class VideoEditor:
             bg_video_path: 背景動画のパス（Noneの場合は背景動画なし）
             enable_animation: 画像アニメーションを有効にするか
             animation_scale: アニメーションのスケール（ズーム/移動量）
+            animation_types: {シーン番号: アニメーションタイプ}の辞書（Noneの場合はランダム）
         
         Returns:
             Path: 生成された動画ファイルのパス
@@ -111,6 +113,7 @@ class VideoEditor:
             }
         
         video_clips = []
+        previous_animation_type = None  # 前のシーンのアニメーションタイプを記録
         
         for scene in scenes:
             scene_number = scene.get("scene_number")
@@ -140,21 +143,53 @@ class VideoEditor:
                 image_clip = ImageClip(str(image_path))
                 
                 # アニメーションの適用
+                animation_type = None
                 if enable_animation:
-                    # ランダムにアニメーションタイプを選択
-                    animation_type = random.choice(ANIMATION_TYPES)
-                    logger.info(f"シーン{scene_number}にアニメーション適用: {animation_type}")
-                    
-                    # アニメーション付きクリップを作成
-                    image_clip = self._apply_animation(
-                        image_clip,
-                        animation_type,
-                        actual_duration,
-                        animation_scale
-                    )
+                    # アニメーションタイプの決定
+                    if animation_types is not None:
+                        # 個別指定モード：animation_types辞書に含まれているシーンのみアニメーションを適用
+                        if scene_key in animation_types:
+                            animation_type = animation_types[scene_key]
+                            if animation_type:  # None（「なし」）の場合はアニメーションを適用しない
+                                previous_animation_type = animation_type  # 次のシーンのために記録
+                                logger.info(f"シーン{scene_number}にアニメーション適用: {animation_type}")
+                                # アニメーション付きクリップを作成
+                                image_clip = self._apply_animation(
+                                    image_clip,
+                                    animation_type,
+                                    actual_duration,
+                                    animation_scale
+                                )
+                            else:
+                                # 「なし」が選択された場合はアニメーションなし（前のアニメーションは保持）
+                                image_clip = image_clip.resize((self.width, self.height))
+                        else:
+                            # 個別指定モードで設定されていないシーンはアニメーションなし（前のアニメーションは保持）
+                            image_clip = image_clip.resize((self.width, self.height))
+                    else:
+                        # ランダムモード：ランダムにアニメーションタイプを選択（前のシーンと異なるものを選択）
+                        available_animations = [
+                            anim for anim in ANIMATION_TYPES 
+                            if anim != previous_animation_type
+                        ]
+                        # 前のシーンと同じアニメーションしか残っていない場合は全種類から選択
+                        if not available_animations:
+                            available_animations = ANIMATION_TYPES
+                        
+                        animation_type = random.choice(available_animations)
+                        previous_animation_type = animation_type  # 次のシーンのために記録
+                        logger.info(f"シーン{scene_number}にアニメーション適用: {animation_type}")
+                        # アニメーション付きクリップを作成
+                        image_clip = self._apply_animation(
+                            image_clip,
+                            animation_type,
+                            actual_duration,
+                            animation_scale
+                        )
                 else:
                     # アニメーションなしの場合は通常のリサイズ
                     image_clip = image_clip.resize((self.width, self.height))
+                    previous_animation_type = None  # アニメーションなしの場合はリセット
                 
                 # 音声の長さに合わせて画像の長さを調整
                 image_clip = image_clip.set_duration(actual_duration)
@@ -175,7 +210,7 @@ class VideoEditor:
                         video_clip = CompositeVideoClip([video_clip, subtitle_clip])
                 
                 video_clips.append(video_clip)
-                animation_info = f", アニメーション: {animation_type}" if enable_animation else ""
+                animation_info = f", アニメーション: {animation_type}" if enable_animation and animation_type else ""
                 logger.info(f"シーン{scene_number}の動画クリップを作成しました（長さ: {actual_duration:.2f}秒{animation_info}）")
             
             except Exception as e:

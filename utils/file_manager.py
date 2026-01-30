@@ -186,6 +186,68 @@ class FileManager:
             files.extend(self.stock_images_dir.glob(ext))
         return sorted(files)
     
+    def save_image_mapping(self, script_name: str, image_mapping: dict) -> Path:
+        """
+        画像マッピング情報をJSON形式で保存
+        
+        Args:
+            script_name: 台本ファイル名（拡張子なし）
+            image_mapping: {シーン番号: 画像ファイルパス}の辞書
+        
+        Returns:
+            Path: 保存されたファイルのパス
+        """
+        mapping_filename = f"{script_name}_image_mapping.json"
+        mapping_path = self.scripts_dir / mapping_filename
+        
+        try:
+            # パスを文字列に変換して保存
+            mapping_data = {
+                str(scene_key): str(image_path) 
+                for scene_key, image_path in image_mapping.items()
+            }
+            
+            with open(mapping_path, "w", encoding="utf-8") as f:
+                json.dump(mapping_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"画像マッピングを保存しました: {mapping_path}")
+            return mapping_path
+        except Exception as e:
+            logger.error(f"画像マッピングの保存に失敗しました: {e}")
+            raise
+    
+    def load_image_mapping(self, script_name: str) -> Optional[dict]:
+        """
+        画像マッピング情報をJSON形式で読み込み
+        
+        Args:
+            script_name: 台本ファイル名（拡張子なし）
+        
+        Returns:
+            dict: {シーン番号: 画像ファイルパス}の辞書、見つからない場合はNone
+        """
+        mapping_filename = f"{script_name}_image_mapping.json"
+        mapping_path = self.scripts_dir / mapping_filename
+        
+        if not mapping_path.exists():
+            return None
+        
+        try:
+            with open(mapping_path, "r", encoding="utf-8") as f:
+                mapping_data = json.load(f)
+            
+            # 文字列をPathオブジェクトに変換
+            image_mapping = {
+                scene_key: Path(image_path_str)
+                for scene_key, image_path_str in mapping_data.items()
+            }
+            
+            logger.info(f"画像マッピングを読み込みました: {mapping_path}")
+            return image_mapping
+        except Exception as e:
+            logger.error(f"画像マッピングの読み込みに失敗しました: {e}")
+            return None
+    
     def list_bgvideos(self) -> list[Path]:
         """
         背景動画ファイルのリストを取得

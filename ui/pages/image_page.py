@@ -165,6 +165,14 @@ def show_image_page():
                         instruction=image_instruction if image_instruction.strip() else None
                     )
                     st.session_state.generated_images = image_files
+                    
+                    # 画像マッピング情報を保存（台本ファイル名をキーとして）
+                    try:
+                        script_name = selected_script_name.replace(".json", "")
+                        file_manager.save_image_mapping(script_name, image_files)
+                    except Exception as e:
+                        logger.warning(f"画像マッピングの保存に失敗しました: {e}")
+                    
                     st.success(f"✅ {len(image_files)}個の画像ファイルを生成しました！")
                     logger.info(f"画像生成が成功しました: {len(image_files)}個のファイル")
                 
@@ -179,39 +187,66 @@ def show_image_page():
             
             if not stock_images:
                 st.error("❌ ストック画像がありません。`output/stock_images/` フォルダに画像を配置してください。")
-            elif len(stock_images) < len(scenes):
-                st.error(f"❌ ストック画像が足りません。シーン数: {len(scenes)}、ストック画像数: {len(stock_images)}")
             else:
-                with st.spinner("ストック画像を紐づけ中..."):
-                    try:
-                        # ランダムにシャッフル
-                        shuffled_images = random.sample(stock_images, len(scenes))
-                        
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        assigned_images = {}
-                        
-                        for i, scene in enumerate(scenes):
-                            scene_number = scene.get("scene_number")
-                            stock_image_path = shuffled_images[i]
+                # 既に割り当て済みのストック画像を取得
+                # セッションステートで使用済みのストック画像を追跡
+                if "used_stock_images" not in st.session_state:
+                    st.session_state.used_stock_images = set()
+                
+                # 既に割り当て済みの画像を除外
+                available_images = [
+                    img for img in stock_images 
+                    if img not in st.session_state.used_stock_images
+                ]
+                
+                if len(available_images) < len(scenes):
+                    st.error(
+                        f"❌ 未使用のストック画像が足りません。\n"
+                        f"シーン数: {len(scenes)}、未使用のストック画像数: {len(available_images)}\n"
+                        f"（既に {len(st.session_state.used_stock_images)} 個の画像が使用済みです）"
+                    )
+                else:
+                    with st.spinner("ストック画像を紐づけ中..."):
+                        try:
+                            # 未使用の画像からランダムに選択（重複なし）
+                            shuffled_images = random.sample(available_images, len(scenes))
                             
-                            # 新しいファイル名を生成（拡張子は小文字に統一）
-                            extension = stock_image_path.suffix.lower()
-                            new_filename = f"image_scene{scene_number:03d}_{timestamp}{extension}"
-                            new_path = file_manager.images_dir / new_filename
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            assigned_images = {}
                             
-                            # 画像をコピー
-                            shutil.copy2(stock_image_path, new_path)
+                            for i, scene in enumerate(scenes):
+                                scene_number = scene.get("scene_number")
+                                stock_image_path = shuffled_images[i]
+                                
+                                # 使用済みとしてマーク
+                                st.session_state.used_stock_images.add(stock_image_path)
+                                
+                                # 新しいファイル名を生成（拡張子は小文字に統一）
+                                extension = stock_image_path.suffix.lower()
+                                new_filename = f"image_scene{scene_number:03d}_{timestamp}{extension}"
+                                new_path = file_manager.images_dir / new_filename
+                                
+                                # 画像をコピー
+                                shutil.copy2(stock_image_path, new_path)
+                                
+                                assigned_images[str(scene_number)] = new_path
                             
-                            assigned_images[str(scene_number)] = new_path
+                            st.session_state.generated_images = assigned_images
+                            
+                            # 画像マッピング情報を保存（台本ファイル名をキーとして）
+                            try:
+                                script_name = selected_script_name.replace(".json", "")
+                                file_manager.save_image_mapping(script_name, assigned_images)
+                            except Exception as e:
+                                logger.warning(f"画像マッピングの保存に失敗しました: {e}")
+                            
+                            st.success(f"✅ {len(assigned_images)}個のストック画像を紐づけました！")
+                            logger.info(f"ストック画像の紐づけが成功しました: {len(assigned_images)}個のファイル")
+                            st.rerun()
                         
-                        st.session_state.generated_images = assigned_images
-                        st.success(f"✅ {len(assigned_images)}個のストック画像を紐づけました！")
-                        logger.info(f"ストック画像の紐づけが成功しました: {len(assigned_images)}個のファイル")
-                        st.rerun()
-                    
-                    except Exception as e:
-                        st.error(f"❌ ストック画像の紐づけに失敗しました: {e}")
-                        logger.error(f"ストック画像紐づけエラー: {e}")
+                        except Exception as e:
+                            st.error(f"❌ ストック画像の紐づけに失敗しました: {e}")
+                            logger.error(f"ストック画像紐づけエラー: {e}")
     
     with col3:
         if st.button("🔄 クリア", use_container_width=True):
@@ -261,6 +296,17 @@ def show_image_page():
                                 instruction=image_instruction if image_instruction.strip() else None
                             )
                             st.session_state.generated_images[scene_key] = image_path
+                            
+                            # 画像マッピング情報を更新（台本ファイル名をキーとして）
+                            try:
+                                script_name = selected_script_name.replace(".json", "")
+                                # 既存のマッピングを読み込んで更新
+                                existing_mapping = file_manager.load_image_mapping(script_name) or {}
+                                existing_mapping[scene_key] = image_path
+                                file_manager.save_image_mapping(script_name, existing_mapping)
+                            except Exception as e:
+                                logger.warning(f"画像マッピングの更新に失敗しました: {e}")
+                            
                             st.success(f"✅ 画像を生成しました！")
                             st.rerun()
                         
