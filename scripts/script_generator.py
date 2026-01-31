@@ -4,6 +4,7 @@ GPT-4oを使用して台本を生成
 """
 from typing import Optional
 from openai import OpenAI
+import pykakasi
 
 from config.config import config
 from config.constants import OPENAI_MODEL
@@ -21,6 +22,8 @@ class ScriptGenerator:
         
         self.client = OpenAI(api_key=config.openai_api_key)
         self.model = OPENAI_MODEL
+        # pykakasiの初期化（漢字→ひらがな変換用）
+        self.kks = pykakasi.kakasi()
     
     def extract_insights(self, reference_script: str) -> list[str]:
         """
@@ -162,6 +165,9 @@ class ScriptGenerator:
             if extracted_insights:
                 script_data["insights"] = extracted_insights
             
+            # 各シーンのdialogueをひらがなに変換してdialogue_for_ttsを追加
+            script_data = self._add_tts_dialogue(script_data)
+            
             logger.info("台本生成が完了しました")
             return script_data
         
@@ -252,11 +258,52 @@ class ScriptGenerator:
 
 【注意事項】
 - 各シーンのdialogueは、視聴者の興味を引く内容にしてください
+- 各シーンのdialogueは、指定されたduration（{scene_duration:.1f}秒）に合わせて、適切な長さのセリフにしてください。目安として、1秒あたり約3〜4文字程度のセリフ量を目指してください（例：{scene_duration:.1f}秒のシーンなら約{int(scene_duration * 3.5)}〜{int(scene_duration * 4)}文字程度）
+- セリフは自然な話し言葉で、指定された時間内で読み上げられる長さにしてください
 - image_promptは、DALL-E 3で画像生成するための詳細なプロンプトにしてください（日本語でOK）
 - subtitleは、dialogueを短く要約した字幕用テキストにしてください
 - すべてのシーンを配列で出力してください
 """
         return prompt
+    
+    def _convert_to_hiragana(self, text: str) -> str:
+        """
+        テキストをひらがなに変換
+        
+        Args:
+            text: 変換するテキスト
+        
+        Returns:
+            str: ひらがなに変換されたテキスト
+        """
+        try:
+            result = self.kks.convert(text)
+            hiragana_text = "".join([item["hira"] for item in result])
+            return hiragana_text
+        except Exception as e:
+            logger.warning(f"ひらがな変換に失敗しました（元のテキストを使用）: {e}")
+            return text
+    
+    def _add_tts_dialogue(self, script_data: dict) -> dict:
+        """
+        各シーンのdialogueをひらがなに変換してdialogue_for_ttsフィールドを追加
+        
+        Args:
+            script_data: 台本データ
+        
+        Returns:
+            dict: dialogue_for_ttsフィールドが追加された台本データ
+        """
+        scenes = script_data.get("scenes", [])
+        for scene in scenes:
+            dialogue = scene.get("dialogue", "")
+            if dialogue:
+                # ひらがなに変換
+                dialogue_for_tts = self._convert_to_hiragana(dialogue)
+                scene["dialogue_for_tts"] = dialogue_for_tts
+                logger.debug(f"シーン{scene.get('scene_number')}のdialogue_for_ttsを生成: {dialogue_for_tts[:50]}...")
+        
+        return script_data
     
     def regenerate_scene(
         self,

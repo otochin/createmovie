@@ -52,6 +52,7 @@ def show_script_page():
         
         instruction = st.text_area(
             "台本生成指示",
+            value="- かわいい女性が読み上げるセリフにすること\n- 最初にオープニングと、最後にエンディングもつけること\n- 雑学の根拠や理由を深堀りして視聴者に教えてあげること",
             placeholder="台本生成時の特別な指示を入力してください（オプション）\n\n例:\n- 専門用語は避けて、わかりやすい言葉で説明してください\n- 冒頭で視聴者の注意を引くフックを入れてください\n- 各シーンで具体的な例を1つずつ挙げてください",
             help="台本生成時に考慮してほしい特別な指示や要件を入力できます",
             height=100
@@ -165,6 +166,10 @@ def show_script_page():
         for scene in script_data.get("scenes", []):
             with st.expander(f"シーン {scene.get('scene_number', 0)} - {scene.get('duration', 0):.1f}秒"):
                 st.markdown(f"**セリフ**: {scene.get('dialogue', '')}")
+                # 音声読み上げ用テキスト（ひらがな）がある場合は表示
+                dialogue_for_tts = scene.get('dialogue_for_tts', '')
+                if dialogue_for_tts:
+                    st.markdown(f"**音声読み上げ用テキスト（ひらがな）**: {dialogue_for_tts}")
                 st.markdown(f"**字幕**: {scene.get('subtitle', '')}")
                 st.markdown(f"**画像プロンプト**: {scene.get('image_prompt', '')}")
         

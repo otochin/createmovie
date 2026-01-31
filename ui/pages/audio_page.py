@@ -163,6 +163,10 @@ def show_audio_page():
         
         with st.expander(f"シーン {scene_number} - {subtitle[:50] if subtitle else dialogue[:50]}..."):
             st.markdown(f"**セリフ**: {dialogue}")
+            # dialogue_for_ttsがある場合は表示
+            dialogue_for_tts = scene.get("dialogue_for_tts", "")
+            if dialogue_for_tts:
+                st.markdown(f"**音声読み上げ用テキスト（ひらがな）**: {dialogue_for_tts}")
             
             # 既に生成されているかチェック
             scene_key = str(scene_number)
@@ -183,8 +187,12 @@ def show_audio_page():
                     with st.spinner(f"シーン{scene_number}の音声を生成中..."):
                         try:
                             generator = st.session_state.audio_generator
+                            # dialogue_for_ttsがあればそれを使用、なければdialogueを使用
+                            dialogue_for_tts = scene.get("dialogue_for_tts", "")
+                            text_for_tts = dialogue_for_tts if dialogue_for_tts else dialogue
+                            
                             audio_path = generator.generate_audio_file(
-                                text=dialogue,
+                                text=text_for_tts,
                                 scene_number=scene_number,
                                 stability=stability,
                                 similarity_boost=similarity_boost

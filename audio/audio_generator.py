@@ -156,21 +156,26 @@ class AudioGenerator:
         
         for scene in scenes:
             scene_number = scene.get("scene_number")
+            # dialogue_for_ttsがあればそれを使用、なければdialogueを使用
+            dialogue_for_tts = scene.get("dialogue_for_tts", "")
             dialogue = scene.get("dialogue", "")
             
-            if not dialogue:
-                logger.warning(f"シーン{scene_number}のdialogueが空です。スキップします。")
+            # 音声読み上げ用テキストを決定
+            text_for_tts = dialogue_for_tts if dialogue_for_tts else dialogue
+            
+            if not text_for_tts:
+                logger.warning(f"シーン{scene_number}のdialogue/dialogue_for_ttsが空です。スキップします。")
                 continue
             
             try:
                 filepath = self.generate_audio_file(
-                    text=dialogue,
+                    text=text_for_tts,
                     scene_number=scene_number,
                     stability=stability,
                     similarity_boost=similarity_boost
                 )
                 audio_files[str(scene_number)] = filepath
-                logger.info(f"シーン{scene_number}の音声生成が完了しました")
+                logger.info(f"シーン{scene_number}の音声生成が完了しました（{'dialogue_for_tts使用' if dialogue_for_tts else 'dialogue使用'}）")
             
             except Exception as e:
                 logger.error(f"シーン{scene_number}の音声生成に失敗しました: {e}")

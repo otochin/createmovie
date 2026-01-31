@@ -132,11 +132,18 @@ class FileManager:
     def list_scripts(self) -> list[Path]:
         """
         保存されている台本ファイルのリストを取得
+        画像マッピングファイル（*_image_mapping.json）は除外する
         
         Returns:
             list[Path]: 台本ファイルのパスのリスト
         """
-        return sorted(self.scripts_dir.glob("*.json"), reverse=True)
+        all_json_files = self.scripts_dir.glob("*.json")
+        # 画像マッピングファイルを除外
+        script_files = [
+            f for f in all_json_files 
+            if not f.name.endswith("_image_mapping.json")
+        ]
+        return sorted(script_files, reverse=True)
     
     def list_audio_files(self) -> list[Path]:
         """

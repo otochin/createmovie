@@ -32,6 +32,9 @@ tqdm>=4.66.0  # プログレスバー表示
 # 日時処理
 python-dateutil>=2.8.2
 
+# 日本語処理（漢字→ひらがな変換）
+pykakasi>=2.2.0
+
 # ファイル操作
 pathlib2>=2.3.7; python_version < '3.4'  # Python 3.4未満の場合のみ
 

@@ -63,6 +63,14 @@ def show_video_page():
     
     # クッキーから読み込んだ設定をセッションステートに反映（初回のみ）
     if "video_settings_loaded" not in st.session_state:
+        # デフォルト値の設定（仕様書に基づく）
+        default_bg_video = "なし（背景動画を使用しない）"
+        bg_videos = file_manager.list_bgvideos()
+        if bg_videos:
+            # 最新のファイルを選択（更新日時でソート済み）
+            latest_bg = sorted(bg_videos, key=lambda x: x.stat().st_mtime, reverse=True)[0]
+            default_bg_video = latest_bg.name
+        
         if saved_settings:
             st.session_state.video_add_subtitles = saved_settings.get("add_subtitles", True)
             st.session_state.video_subtitle_source_idx = saved_settings.get("subtitle_source_idx", 1)  # デフォルト：セリフ
@@ -71,16 +79,26 @@ def show_video_page():
             st.session_state.video_subtitle_stroke_color = saved_settings.get("stroke_color", "#000000")
             st.session_state.video_subtitle_stroke_width = saved_settings.get("stroke_width", 3)  # デフォルト：3
             st.session_state.video_subtitle_bottom_offset = saved_settings.get("bottom_offset", 500)  # デフォルト：500
-            st.session_state.video_bg_video_selected = saved_settings.get("bg_video", "なし（背景動画を使用しない）")
+            st.session_state.video_bg_video_selected = saved_settings.get("bg_video", default_bg_video)
             st.session_state.video_enable_animation = saved_settings.get("enable_animation", True)  # デフォルト：オン
             st.session_state.video_animation_scale = saved_settings.get("animation_scale", 1.1)  # デフォルト：1.1
             st.session_state.video_animation_mode = saved_settings.get("animation_mode", "individual")  # デフォルト：個別指定
             st.session_state.video_animation_types = saved_settings.get("animation_types", {})  # 個別アニメーション設定
-            st.session_state.video_settings_loaded = True
         else:
-            # クッキーがまだ読み込まれていない場合は、次のレンダリングで再試行
-            # 何もしない（デフォルト値が使われる）
-            pass
+            # クッキーが読み込まれていない場合は、デフォルト値を設定
+            st.session_state.video_add_subtitles = True
+            st.session_state.video_subtitle_source_idx = 1  # デフォルト：セリフ
+            st.session_state.video_subtitle_fontsize = 60
+            st.session_state.video_subtitle_color = "#FFFFFF"
+            st.session_state.video_subtitle_stroke_color = "#000000"
+            st.session_state.video_subtitle_stroke_width = 3  # デフォルト：3
+            st.session_state.video_subtitle_bottom_offset = 500  # デフォルト：500
+            st.session_state.video_bg_video_selected = default_bg_video
+            st.session_state.video_enable_animation = True  # デフォルト：オン
+            st.session_state.video_animation_scale = 1.1  # デフォルト：1.1
+            st.session_state.video_animation_mode = "individual"  # デフォルト：個別指定
+            st.session_state.video_animation_types = {}  # 個別アニメーション設定
+        st.session_state.video_settings_loaded = True
     
     # セッションステートの初期化
     if "video_editor" not in st.session_state:
@@ -268,8 +286,9 @@ def show_video_page():
     st.subheader("🎨 動画生成設定")
     
     # セッションステートの初期化（設定値の保持用）
+    # 注意: クッキー読み込み部分で既に設定されている場合は、その値を使用
     if "video_add_subtitles" not in st.session_state:
-        st.session_state.video_add_subtitles = True
+        st.session_state.video_add_subtitles = True  # デフォルト：オン
     if "video_subtitle_source_idx" not in st.session_state:
         st.session_state.video_subtitle_source_idx = 1  # 0=見出し, 1=セリフ（デフォルト：セリフ）
     if "video_subtitle_fontsize" not in st.session_state:
@@ -281,7 +300,7 @@ def show_video_page():
     if "video_subtitle_stroke_width" not in st.session_state:
         st.session_state.video_subtitle_stroke_width = 3  # デフォルト：3
     if "video_subtitle_bottom_offset" not in st.session_state:
-        st.session_state.video_subtitle_bottom_offset = 500  # デフォルト：500
+        st.session_state.video_subtitle_bottom_offset = 500  # デフォルト：500px
     if "video_bg_video_selected" not in st.session_state:
         # デフォルト：最新の背景動画を選択
         bg_videos = file_manager.list_bgvideos()
@@ -611,26 +630,39 @@ def show_video_page():
         
         video_path = st.session_state.generated_video
         if video_path.exists():
-            # 動画ファイルを読み込み
-            with open(video_path, "rb") as f:
-                video_data = f.read()
-            
             # 動画情報を表示
-            file_size = len(video_data) / (1024 * 1024)  # MB
+            file_size = video_path.stat().st_size / (1024 * 1024)  # MB
             st.caption(f"ファイル名: {video_path.name} | サイズ: {file_size:.2f} MB")
             
-            # 動画を表示（バイトデータを直接渡す、formatを明示）
-            st.video(video_data, format="video/mp4")
+            # 動画を表示（ファイルパスを直接渡す）
+            try:
+                st.video(str(video_path), format="video/mp4")
+            except Exception as e:
+                logger.error(f"動画表示エラー: {e}")
+                st.error(f"動画の表示に失敗しました: {e}")
+                # フォールバック: バイトデータで読み込み
+                try:
+                    with open(video_path, "rb") as f:
+                        video_data = f.read()
+                    st.video(video_data, format="video/mp4")
+                except Exception as e2:
+                    st.error(f"動画の読み込みに失敗しました: {e2}")
             
-            # ダウンロードボタン
-            st.download_button(
-                label="⬇️ 動画をダウンロード",
-                data=video_data,
-                file_name=video_path.name,
-                mime="video/mp4",
-                use_container_width=True,
-                key="download_generated_video"
-            )
+            # ダウンロードボタン（必要に応じてファイルを読み込む）
+            try:
+                with open(video_path, "rb") as f:
+                    video_data = f.read()
+                st.download_button(
+                    label="⬇️ 動画をダウンロード",
+                    data=video_data,
+                    file_name=video_path.name,
+                    mime="video/mp4",
+                    use_container_width=True,
+                    key="download_generated_video"
+                )
+            except Exception as e:
+                logger.error(f"動画ダウンロードボタンの作成エラー: {e}")
+                st.error(f"ダウンロードボタンの作成に失敗しました: {e}")
     
     # 保存済み動画の一覧
     st.markdown("---")
