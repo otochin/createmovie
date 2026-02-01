@@ -84,6 +84,8 @@ def show_video_page():
             st.session_state.video_animation_scale = saved_settings.get("animation_scale", 1.1)  # デフォルト：1.1
             st.session_state.video_animation_mode = saved_settings.get("animation_mode", "individual")  # デフォルト：個別指定
             st.session_state.video_animation_types = saved_settings.get("animation_types", {})  # 個別アニメーション設定
+            st.session_state.video_bgm_selected = saved_settings.get("bgm", "なし（BGMを使用しない）")
+            st.session_state.video_bgm_volume = saved_settings.get("bgm_volume", 0.1)  # デフォルト：0.1
         else:
             # クッキーが読み込まれていない場合は、デフォルト値を設定
             st.session_state.video_add_subtitles = True
@@ -98,6 +100,14 @@ def show_video_page():
             st.session_state.video_animation_scale = 1.1  # デフォルト：1.1
             st.session_state.video_animation_mode = "individual"  # デフォルト：個別指定
             st.session_state.video_animation_types = {}  # 個別アニメーション設定
+            # BGM設定の初期化
+            bgm_files = file_manager.list_bgm_files()
+            if bgm_files:
+                latest_bgm = bgm_files[0]  # 最新順にソート済み
+                st.session_state.video_bgm_selected = latest_bgm.name
+            else:
+                st.session_state.video_bgm_selected = "なし（BGMを使用しない）"
+            st.session_state.video_bgm_volume = 0.1  # デフォルト：0.1
         st.session_state.video_settings_loaded = True
     
     # セッションステートの初期化
@@ -318,6 +328,17 @@ def show_video_page():
         st.session_state.video_animation_mode = "individual"  # デフォルト：個別指定
     if "video_animation_types" not in st.session_state:
         st.session_state.video_animation_types = {}  # {シーン番号: アニメーションタイプ}
+    if "video_bgm_selected" not in st.session_state:
+        # デフォルト：最新のBGMファイルを選択
+        bgm_files = file_manager.list_bgm_files()
+        if bgm_files:
+            # 最新のファイルを選択（更新日時でソート済み）
+            latest_bgm = bgm_files[0]  # 既に最新順にソート済み
+            st.session_state.video_bgm_selected = latest_bgm.name
+        else:
+            st.session_state.video_bgm_selected = "なし（BGMを使用しない）"
+    if "video_bgm_volume" not in st.session_state:
+        st.session_state.video_bgm_volume = 0.3  # デフォルト：0.3
     
     add_subtitles = st.checkbox(
         "字幕を追加",
@@ -417,6 +438,52 @@ def show_video_page():
             st.info(f"✅ 背景動画: {selected_bg_video}")
     else:
         st.info("💡 背景動画を使用するには、`output/bgvideos/`フォルダに動画ファイル（MP4等）を配置してください。")
+    
+    st.markdown("---")
+    st.subheader("🎵 BGM設定")
+    
+    # BGMの選択
+    bgm_files = file_manager.list_bgm_files()
+    bgm_path = None
+    
+    if bgm_files:
+        bgm_options = ["なし（BGMを使用しない）"] + [f.name for f in bgm_files]
+        
+        # 保存された選択が有効か確認
+        saved_bgm_selection = st.session_state.video_bgm_selected
+        if saved_bgm_selection not in bgm_options:
+            # 最新のファイルを選択
+            if bgm_files:
+                saved_bgm_selection = bgm_files[0].name
+            else:
+                saved_bgm_selection = "なし（BGMを使用しない）"
+            st.session_state.video_bgm_selected = saved_bgm_selection
+        
+        selected_bgm = st.selectbox(
+            "BGMを選択",
+            options=bgm_options,
+            index=bgm_options.index(saved_bgm_selection) if saved_bgm_selection in bgm_options else 0,
+            help="動画に追加するBGMを選択します。`output/bgm/`フォルダにWAVファイルを配置してください。"
+        )
+        # 選択結果を保存
+        st.session_state.video_bgm_selected = selected_bgm
+        
+        if selected_bgm != "なし（BGMを使用しない）":
+            bgm_path = file_manager.bgm_dir / selected_bgm
+            st.info(f"✅ BGM: {selected_bgm}")
+            
+            # BGM音量の調整（keyを指定しているので、値は自動的にst.session_state.video_bgm_volumeに保存される）
+            st.slider(
+                "BGM音量",
+                min_value=0.0,
+                max_value=1.0,
+                value=st.session_state.video_bgm_volume,
+                step=0.1,
+                key="video_bgm_volume",
+                help="BGMの音量を調整します（0.0=無音、1.0=最大音量）。ナレーション音声が聞き取りやすくなるよう、0.2〜0.4程度を推奨します。"
+            )
+    else:
+        st.info("💡 BGMを使用するには、`output/bgm/`フォルダにWAVファイルを配置してください。")
     
     st.markdown("---")
     st.subheader("🎞️ 画像アニメーション設定")
@@ -582,7 +649,9 @@ def show_video_page():
         "enable_animation": st.session_state.video_enable_animation,
         "animation_scale": st.session_state.video_animation_scale,
         "animation_mode": st.session_state.video_animation_mode,
-        "animation_types": st.session_state.video_animation_types
+        "animation_types": st.session_state.video_animation_types,
+        "bgm": st.session_state.video_bgm_selected,
+        "bgm_volume": st.session_state.video_bgm_volume
     }
     save_video_settings_to_cookie(cookie_manager, current_settings)
     
@@ -590,33 +659,48 @@ def show_video_page():
     st.subheader("🎬 動画生成")
     
     if st.button("🚀 動画を生成", use_container_width=True, type="primary"):
-        with st.spinner("動画を生成中..."):
-            try:
-                editor = st.session_state.video_editor
-                video_path = editor.create_video_from_script(
-                    script_data=script_data,
-                    image_files=image_files,
-                    audio_files=audio_files,
-                    add_subtitles=add_subtitles,
-                    subtitle_style=subtitle_style,
-                    subtitle_source=subtitle_source,
-                    subtitle_bottom_offset=subtitle_bottom_offset,
-                    bg_video_path=bg_video_path,
-                    enable_animation=enable_animation,
-                    animation_scale=animation_scale,
-                    animation_types=animation_types if enable_animation else None
-                )
-                
-                st.session_state.generated_video = video_path
-                st.session_state.video_just_generated = True
-                logger.info(f"動画生成が成功しました: {video_path}")
-                
-                # 動画生成完了後にリランして表示を更新
-                st.rerun()
+        # プログレスバーを作成
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        def update_progress(message: str, progress: float):
+            """プログレスバーとステータステキストを更新"""
+            progress_bar.progress(progress)
+            status_text.text(f"📹 {message} ({int(progress * 100)}%)")
+        
+        try:
+            editor = st.session_state.video_editor
+            video_path = editor.create_video_from_script(
+                script_data=script_data,
+                image_files=image_files,
+                audio_files=audio_files,
+                add_subtitles=add_subtitles,
+                subtitle_style=subtitle_style,
+                subtitle_source=subtitle_source,
+                subtitle_bottom_offset=subtitle_bottom_offset,
+                bg_video_path=bg_video_path,
+                enable_animation=enable_animation,
+                animation_scale=animation_scale,
+                animation_types=animation_types if enable_animation else None,
+                bgm_path=bgm_path,
+                bgm_volume=st.session_state.video_bgm_volume,
+                progress_callback=update_progress
+            )
             
-            except Exception as e:
-                st.error(f"❌ 動画生成に失敗しました: {e}")
-                logger.error(f"動画生成エラー: {e}")
+            st.session_state.generated_video = video_path
+            st.session_state.video_just_generated = True
+            logger.info(f"動画生成が成功しました: {video_path}")
+            
+            # プログレスバーを100%にして完了メッセージを表示
+            progress_bar.progress(1.0)
+            status_text.text("✅ 動画の生成が完了しました！")
+            
+            # 動画生成完了後にリランして表示を更新
+            st.rerun()
+        
+        except Exception as e:
+            st.error(f"❌ 動画生成に失敗しました: {e}")
+            logger.error(f"動画生成エラー: {e}")
     
     # 生成完了メッセージ（一度だけ表示）
     if st.session_state.get("video_just_generated", False):

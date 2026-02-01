@@ -24,6 +24,7 @@ class FileManager:
         self.videos_dir = config.output_videos_dir
         self.stock_images_dir = config.output_stock_images_dir
         self.bgvideos_dir = config.output_bgvideos_dir
+        self.bgm_dir = config.output_bgm_dir
     
     def save_script(self, script_data: dict, filename: Optional[str] = None) -> Path:
         """
@@ -267,6 +268,19 @@ class FileManager:
         for ext in extensions:
             files.extend(self.bgvideos_dir.glob(ext))
         return sorted(files)
+    
+    def list_bgm_files(self) -> list[Path]:
+        """
+        BGMファイルのリストを取得
+        
+        Returns:
+            list[Path]: BGMファイルのパスのリスト
+        """
+        extensions = ["*.wav", "*.WAV"]
+        files = []
+        for ext in extensions:
+            files.extend(self.bgm_dir.glob(ext))
+        return sorted(files, key=lambda x: x.stat().st_mtime, reverse=True)  # 最新順にソート
     
     def ensure_directory_exists(self, directory: Path):
         """

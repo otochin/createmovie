@@ -19,6 +19,7 @@ from moviepy.editor import (
     AudioFileClip,
     VideoFileClip,
     CompositeVideoClip,
+    CompositeAudioClip,
     concatenate_videoclips
 )
 from moviepy.video.fx import resize
@@ -71,7 +72,10 @@ class VideoEditor:
         bg_video_path: Optional[Path] = None,
         enable_animation: bool = False,
         animation_scale: float = 1.2,
-        animation_types: Optional[Dict[str, str]] = None
+        animation_types: Optional[Dict[str, str]] = None,
+        bgm_path: Optional[Path] = None,
+        bgm_volume: float = 0.1,
+        progress_callback: Optional[Callable[[str, float], None]] = None
     ) -> Path:
         """
         台本データから動画を生成
@@ -89,6 +93,8 @@ class VideoEditor:
             enable_animation: 画像アニメーションを有効にするか
             animation_scale: アニメーションのスケール（ズーム/移動量）
             animation_types: {シーン番号: アニメーションタイプ}の辞書（Noneの場合はランダム）
+            bgm_path: BGMファイルのパス（Noneの場合はBGMなし）
+            bgm_volume: BGMの音量（0.0-1.0、デフォルト: 0.1）
         
         Returns:
             Path: 生成された動画ファイルのパス
@@ -98,6 +104,24 @@ class VideoEditor:
         scenes = script_data.get("scenes", [])
         if not scenes:
             raise ValueError("台本にシーンがありません")
+        
+        # 進捗管理
+        # ステップ数の計算：シーン数 + 結合(1) + 背景動画(条件付き1) + BGM(条件付き1) + 書き出し(1)
+        base_steps = len(scenes) + 1 + 1  # シーン数 + 結合 + 書き出し
+        if bg_video_path and bg_video_path.exists():
+            base_steps += 1  # 背景動画
+        if bgm_path and bgm_path.exists():
+            base_steps += 1  # BGM
+        total_steps = base_steps
+        current_step = 0
+        
+        def update_progress(message: str, step_increment: int = 1):
+            """進捗を更新"""
+            nonlocal current_step
+            current_step += step_increment
+            progress = min(current_step / total_steps, 1.0)  # 1.0を超えないように制限
+            if progress_callback:
+                progress_callback(message, progress)
         
         # 字幕スタイルのデフォルト設定
         if subtitle_style is None:
@@ -212,6 +236,7 @@ class VideoEditor:
                 video_clips.append(video_clip)
                 animation_info = f", アニメーション: {animation_type}" if enable_animation and animation_type else ""
                 logger.info(f"シーン{scene_number}の動画クリップを作成しました（長さ: {actual_duration:.2f}秒{animation_info}）")
+                update_progress(f"シーン{scene_number}/{len(scenes)}の処理が完了しました", 1)
             
             except Exception as e:
                 logger.error(f"シーン{scene_number}の動画クリップ作成に失敗しました: {e}")
@@ -222,13 +247,16 @@ class VideoEditor:
         
         # すべてのクリップを結合
         logger.info(f"{len(video_clips)}個のクリップを結合します")
+        update_progress("動画クリップを結合中...", 0)
         final_video = concatenate_videoclips(video_clips, method="compose")
+        update_progress("動画クリップの結合が完了しました", 1)
         
         # 背景動画の合成
         bg_video_clip = None
         if bg_video_path and bg_video_path.exists():
             try:
                 logger.info(f"背景動画を読み込みます: {bg_video_path}")
+                update_progress("背景動画を処理中...", 0)
                 bg_video_clip = VideoFileClip(str(bg_video_path))
                 
                 # 背景動画をリサイズ
@@ -257,11 +285,57 @@ class VideoEditor:
                 # 背景動画の上にメイン動画を合成
                 logger.info("背景動画とメイン動画を合成します")
                 final_video = CompositeVideoClip([bg_video_looped, final_video])
+                update_progress("背景動画の合成が完了しました", 1)
                 
             except Exception as e:
                 logger.error(f"背景動画の処理に失敗しました: {e}")
                 # 背景動画の処理に失敗しても、元の動画は生成する
                 logger.warning("背景動画なしで動画を生成します")
+        
+        # BGMの追加
+        if bgm_path and bgm_path.exists():
+            try:
+                logger.info(f"BGMを読み込みます: {bgm_path}")
+                update_progress("BGMを処理中...", 0)
+                bgm_clip = AudioFileClip(str(bgm_path))
+                
+                # 最終動画の長さを取得
+                total_duration = final_video.duration
+                
+                # BGMをループさせて必要な長さにする
+                if bgm_clip.duration < total_duration:
+                    # ループ回数を計算
+                    loop_count = int(total_duration / bgm_clip.duration) + 1
+                    logger.info(f"BGMをループします（{loop_count}回）")
+                    
+                    # ループさせたBGMを作成
+                    bgm_clips = [bgm_clip] * loop_count
+                    bgm_looped = concatenate_videoclips(bgm_clips, method="compose")
+                    bgm_looped = bgm_looped.subclip(0, total_duration)
+                else:
+                    # BGMが十分長い場合はそのまま使用
+                    bgm_looped = bgm_clip.subclip(0, total_duration)
+                
+                # BGMの音量を調整
+                bgm_looped = bgm_looped.volumex(bgm_volume)
+                
+                # 元の音声とBGMを合成
+                logger.info(f"BGMを合成します（音量: {bgm_volume}）")
+                if final_video.audio is not None:
+                    # 元の音声とBGMを合成
+                    final_audio = CompositeAudioClip([final_video.audio, bgm_looped])
+                    final_video = final_video.set_audio(final_audio)
+                else:
+                    # 元の音声がない場合はBGMのみ
+                    final_video = final_video.set_audio(bgm_looped)
+                
+                logger.info("BGMの合成が完了しました")
+                update_progress("BGMの合成が完了しました", 1)
+                
+            except Exception as e:
+                logger.error(f"BGMの処理に失敗しました: {e}")
+                # BGMの処理に失敗しても、元の動画は生成する
+                logger.warning("BGMなしで動画を生成します")
         
         # 出力ファイル名の生成
         if output_filename is None:
@@ -274,6 +348,7 @@ class VideoEditor:
         
         # 動画を書き出し
         try:
+            update_progress("動画ファイルを書き出し中...（この処理には時間がかかります）", 0)
             final_video.write_videofile(
                 str(output_path),
                 fps=self.fps,
@@ -284,6 +359,7 @@ class VideoEditor:
                 logger=None  # MoviePyのログを無効化
             )
             
+            update_progress("動画の生成が完了しました！", 1)
             logger.info(f"動画を生成しました: {output_path}")
             return output_path
         
