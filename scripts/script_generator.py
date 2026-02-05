@@ -210,8 +210,8 @@ class ScriptGenerator:
             if extracted_knowledge:
                 script_data["knowledge"] = extracted_knowledge
             
-            # 各シーンのdialogueをひらがなに変換してdialogue_for_ttsを追加
-            script_data = self._add_tts_dialogue(script_data)
+            # APIがdialogue_for_ttsを返していないシーンがあれば、ひらがな変換で補う
+            script_data = self._ensure_tts_dialogue(script_data)
             
             logger.info("台本生成が完了しました")
             return script_data
@@ -308,6 +308,7 @@ class ScriptGenerator:
     {{
       "scene_number": 1,
       "dialogue": "このシーンのセリフ（ナレーション）",
+      "dialogue_for_tts": "このシーンの音声読み上げ用テキスト（下記のルールで作成）",
       "image_prompt": "このシーン用の画像を生成するためのプロンプト（詳細で具体的に）",
       "duration": {scene_duration:.1f},
       "subtitle": "字幕として表示するテキスト"
@@ -315,6 +316,12 @@ class ScriptGenerator:
   ],
   "total_duration": {duration}
 }}
+
+【dialogue_for_tts のルール】
+- dialogue の内容を、音声AIで自然に読み上げられる形にしたテキストを必ず出力してください。
+- 漢字はひらがなにしてください。固有名詞・専門用語・外来語はカタカナのままにしてください。
+- 読み上げの区切りが自然になるよう、適切な位置に読点「、」と句点「。」を入れてください（接続詞の後や、息継ぎの位置など）。
+- dialogue と意味・内容は同一にし、句読点の追加と表記の変換のみ行ってください。
 
 【注意事項】
 - 各シーンのdialogueは、視聴者の興味を引く内容にしてください
@@ -356,7 +363,7 @@ class ScriptGenerator:
         except Exception as e:
             logger.warning(f"ひらがな変換に失敗しました（元のテキストを使用）: {e}")
             return text
-    
+
     def _is_katakana(self, text: str) -> bool:
         """
         テキストがカタカナかどうかを判定
@@ -373,25 +380,29 @@ class ScriptGenerator:
                 return True
         return False
     
-    def _add_tts_dialogue(self, script_data: dict) -> dict:
+    def _ensure_tts_dialogue(self, script_data: dict) -> dict:
         """
-        各シーンのdialogueをひらがなに変換してdialogue_for_ttsフィールドを追加
-        
+        ［APIが返した dialogue_for_tts をそのまま利用し、
+        欠けているシーンのみ dialogue からひらがな変換して dialogue_for_tts を補う。
+
         Args:
-            script_data: 台本データ
-        
+            script_data: 台本データ（API応答。dialogue_for_tts が含まれる場合あり）
+
         Returns:
-            dict: dialogue_for_ttsフィールドが追加された台本データ
+            dict: 全シーンに dialogue_for_tts が入った台本データ
         """
         scenes = script_data.get("scenes", [])
         for scene in scenes:
+            dialogue_for_tts = scene.get("dialogue_for_tts", "").strip()
             dialogue = scene.get("dialogue", "")
-            if dialogue:
-                # ひらがなに変換
-                dialogue_for_tts = self._convert_to_hiragana(dialogue)
+            if dialogue_for_tts:
+                # APIが返した読み上げ用テキストをそのまま使用
                 scene["dialogue_for_tts"] = dialogue_for_tts
-                logger.debug(f"シーン{scene.get('scene_number')}のdialogue_for_ttsを生成: {dialogue_for_tts[:50]}...")
-        
+                logger.debug(f"シーン{scene.get('scene_number')}のdialogue_for_ttsをAPI応答のまま使用")
+            elif dialogue:
+                # 未返却時は従来どおりひらがな変換で補う
+                scene["dialogue_for_tts"] = self._convert_to_hiragana(dialogue)
+                logger.debug(f"シーン{scene.get('scene_number')}のdialogue_for_ttsをひらがな変換で補完")
         return script_data
     
     def regenerate_scene(

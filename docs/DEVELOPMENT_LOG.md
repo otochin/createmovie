@@ -6,6 +6,32 @@
 
 ## 2026年
 
+### 2026-02-04 - 音声読み上げ用テキスト（dialogue_for_tts）をOpenAIの応答で取得するように変更
+
+#### 実施内容
+- 台本生成時に、句読点付きの読み上げ用テキスト（`dialogue_for_tts`）をOpenAIに生成させ、API応答として受け取るように変更
+- 接続詞の後に読点を入れる固定リストによるコード内判定を廃止
+
+#### 完了項目
+- [x] 台本生成プロンプトに`dialogue_for_tts`の出力を追加（各シーンで必須）
+- [x] プロンプトに「ひらがな・カタカナは固有名詞等のまま」「適切な句読点（、。）を挿入」のルールを明記
+- [x] APIが返した`dialogue_for_tts`をそのまま利用し、未返却シーンのみローカルでひらがな変換して補完（`_ensure_tts_dialogue`）
+- [x] 固定接続詞リスト（`TTS_CONJUNCTIONS`）と`_add_commas_after_conjunctions`を削除
+
+#### 実装した変更
+**台本生成（script_generator.py）**:
+- `_create_prompt`: 出力JSONに`dialogue_for_tts`を追加し、【dialogue_for_ttsのルール】で句読点・表記ルールを指示
+- `_ensure_tts_dialogue`: API応答の`dialogue_for_tts`を優先し、欠けているシーンのみ`_convert_to_hiragana`で補完
+- 接続詞リストと読点挿入の後処理を削除（句読点はGPTに一任）
+
+#### 変更ファイル
+- `scripts/script_generator.py` - プロンプト拡張、`_ensure_tts_dialogue`化、接続詞処理の削除
+
+#### 備考
+- 仕様書（README_PLAN.md）を更新済み
+
+---
+
 ### 2026-01-31 - BGM機能追加、プログレスバー実装、台本編集機能追加
 
 #### 実施内容
