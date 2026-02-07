@@ -43,6 +43,20 @@
 - 画像生成で選んだフォーマットを動画編集で開くと同一フォーマットが選択された状態になる
 - 仕様書を更新済み
 
+#### 追記（同日）: MoviePy ImageClip ismask エラー対応
+- 動画生成時に `'ImageClip' object has no attribute 'ismask'` が発生する事象を修正
+- `video_editor.py` で `resize_fx` をラップし、クリップに `ismask` が無い場合は `False` を付与してから resize を実行
+- `_ensure_ismask(clip)` を追加し、字幕クリップ返却時および `CompositeVideoClip` 合成前に呼び出して blit/resize 時の AttributeError を防止
+
+#### 追記（同日）: 長尺動画の字幕はみ出し・BGM対応
+- **字幕はみ出し修正**:
+  - 字幕の折り返し幅・字幕画像幅を動画幅（`self.width`）に統一（長尺時 1920px）
+  - 折り返し幅の上限を「動画幅 − 余白(100px) − 縁取り分」で制限し、PIL の getbbox が縁取りを含まないことによるはみ出しを防止
+- **長尺動画のBGMが反映されない問題の修正**:
+  - BGMループに動画用の `concatenate_videoclips` ではなく、音声クリップ用の `concatenate_audioclips` を使用
+  - 音量調整を `moviepy.editor` 経由でないため `volumex` を関数としてインポートし適用（`volumex(bgm_looped, bgm_volume)`）
+- 変更ファイル: `video/video_editor.py`（字幕: max_width/img_width の算出、BGM: concatenate_audioclips・volumex のインポートと使用）
+
 ---
 
 ### 2026-02-04 - 音声読み上げ用テキスト（dialogue_for_tts）をOpenAIの応答で取得するように変更

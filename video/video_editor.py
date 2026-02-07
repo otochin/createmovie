@@ -20,8 +20,17 @@ from moviepy.video.VideoClip import ImageClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-from moviepy.audio.AudioClip import CompositeAudioClip
+from moviepy.audio.AudioClip import CompositeAudioClip, concatenate_audioclips
+from moviepy.audio.fx.volumex import volumex
 from moviepy.video.compositing.concatenate import concatenate_videoclips
+from moviepy.video.fx.resize import resize as _resize_fx
+
+
+def resize_fx(clip, *args, **kwargs):
+    """resize を適用。clip に ismask がない場合の AttributeError を防ぐ。"""
+    if not hasattr(clip, "ismask"):
+        clip.ismask = False
+    return _resize_fx(clip, *args, **kwargs)
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
@@ -49,6 +58,13 @@ from utils.file_manager import file_manager
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _ensure_ismask(clip):
+    """MoviePy の blit/resize で参照される ismask が無い場合に付与する。"""
+    if clip is not None and not hasattr(clip, "ismask"):
+        clip.ismask = False
+    return clip
 
 
 class VideoEditor:
@@ -196,10 +212,10 @@ class VideoEditor:
                                 )
                             else:
                                 # 「なし」が選択された場合はアニメーションなし（前のアニメーションは保持）
-                                image_clip = image_clip.resize((self.width, self.height))
+                                image_clip = resize_fx(image_clip, (self.width, self.height))
                         else:
                             # 個別指定モードで設定されていないシーンはアニメーションなし（前のアニメーションは保持）
-                            image_clip = image_clip.resize((self.width, self.height))
+                            image_clip = resize_fx(image_clip, (self.width, self.height))
                     else:
                         # ランダムモード：ランダムにアニメーションタイプを選択（前のシーンと異なるものを選択）
                         available_animations = [
@@ -222,7 +238,7 @@ class VideoEditor:
                         )
                 else:
                     # アニメーションなしの場合は通常のリサイズ
-                    image_clip = image_clip.resize((self.width, self.height))
+                    image_clip = resize_fx(image_clip, (self.width, self.height))
                     previous_animation_type = None  # アニメーションなしの場合はリセット
                 
                 # 音声の長さに合わせて画像の長さを調整
@@ -241,6 +257,8 @@ class VideoEditor:
                     )
                     # 字幕クリップが正常に作成された場合のみ合成
                     if subtitle_clip is not None:
+                        _ensure_ismask(video_clip)
+                        _ensure_ismask(subtitle_clip)
                         video_clip = CompositeVideoClip([video_clip, subtitle_clip])
                 
                 video_clips.append(video_clip)
@@ -270,7 +288,7 @@ class VideoEditor:
                 bg_video_clip = VideoFileClip(str(bg_video_path))
                 
                 # 背景動画をリサイズ
-                bg_video_clip = bg_video_clip.resize((self.width, self.height))
+                bg_video_clip = resize_fx(bg_video_clip, (self.width, self.height))
                 
                 # 最終動画の長さを取得
                 total_duration = final_video.duration
@@ -312,22 +330,22 @@ class VideoEditor:
                 # 最終動画の長さを取得
                 total_duration = final_video.duration
                 
-                # BGMをループさせて必要な長さにする
+                # BGMをループさせて必要な長さにする（音声クリップは concatenate_audioclips を使用）
                 if bgm_clip.duration < total_duration:
                     # ループ回数を計算
                     loop_count = int(total_duration / bgm_clip.duration) + 1
                     logger.info(f"BGMをループします（{loop_count}回）")
                     
-                    # ループさせたBGMを作成
+                    # ループさせたBGMを作成（音声クリップ用の結合）
                     bgm_clips = [bgm_clip] * loop_count
-                    bgm_looped = concatenate_videoclips(bgm_clips, method="compose")
+                    bgm_looped = concatenate_audioclips(bgm_clips)
                     bgm_looped = bgm_looped.subclip(0, total_duration)
                 else:
                     # BGMが十分長い場合はそのまま使用
                     bgm_looped = bgm_clip.subclip(0, total_duration)
                 
-                # BGMの音量を調整
-                bgm_looped = bgm_looped.volumex(bgm_volume)
+                # BGMの音量を調整（サブモジュール直接利用のため volumex を関数で適用）
+                bgm_looped = volumex(bgm_looped, bgm_volume)
                 
                 # 元の音声とBGMを合成
                 logger.info(f"BGMを合成します（音量: {bgm_volume}）")
@@ -409,7 +427,7 @@ class VideoEditor:
         scaled_height = int(self.height * scale)
         
         # 画像を拡大（アニメーション用の余白を確保）
-        clip = clip.resize((scaled_width, scaled_height))
+        clip = resize_fx(clip, (scaled_width, scaled_height))
         
         # 移動量の計算
         move_x = (scaled_width - self.width) // 2
@@ -531,7 +549,7 @@ class VideoEditor:
         
         else:
             # デフォルト：アニメーションなし
-            return clip.resize((self.width, self.height))
+            return resize_fx(clip, (self.width, self.height))
     
     def _create_subtitle_clip(
         self,
@@ -557,7 +575,11 @@ class VideoEditor:
             text_color = style.get("color", "white")
             stroke_color = style.get("stroke_color", "black")
             stroke_width = style.get("stroke_width", 2)
-            max_width = style.get("size", (VIDEO_WIDTH - 100, None))[0]
+            # 折り返し幅：動画幅から余白と縁取り分を引く（はみ出し防止）
+            margin = 100  # 左右の余白（ピクセル）
+            stroke_margin = 2 * max(stroke_width, 1)
+            max_width = style.get("size", (self.width - 100, None))[0]
+            max_width = min(max_width, self.width - margin - stroke_margin)
             
             # フォントの読み込み（日本語対応フォントを優先）
             font = None
@@ -619,11 +641,11 @@ class VideoEditor:
             else:
                 lines = [text]
             
-            # 画像のサイズを計算
+            # 画像のサイズを計算（動画幅に合わせる：ショート1080 / 長尺1920）
             line_height = int(fontsize * 1.2)
             padding = 20
             img_height = len(lines) * line_height + padding * 2
-            img_width = VIDEO_WIDTH
+            img_width = self.width
             
             # 透明な画像を作成
             img = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 0))
@@ -675,6 +697,7 @@ class VideoEditor:
             # 下からのオフセットを考慮した位置を計算
             y_position = self.height - img_height - bottom_offset
             subtitle_clip = subtitle_clip.set_position(("center", y_position))
+            _ensure_ismask(subtitle_clip)
             
             logger.info(f"字幕クリップを作成しました（テキスト: {text[:30]}...）")
             return subtitle_clip

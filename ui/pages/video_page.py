@@ -17,6 +17,20 @@ from config.constants import VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_WIDTH_LONG, VIDEO_
 logger = get_logger(__name__)
 
 
+def _image_path_to_bytes(image_path):  # Path | str -> bytes | None
+    """画像パスをバイト列で読み込む。表示の安定化のため。存在しない・読めない場合は None"""
+    if image_path is None:
+        return None
+    path = Path(image_path) if not isinstance(image_path, Path) else image_path
+    path = path.resolve()
+    if not path.exists():
+        return None
+    try:
+        return path.read_bytes()
+    except Exception:
+        return None
+
+
 def get_cookie_manager():
     """クッキーマネージャーを取得"""
     # セッションステートでCookieManagerを管理
@@ -605,17 +619,17 @@ def show_video_page():
                             # シーン番号を表示
                             st.markdown(f"### シーン {scene_number}")
                             
-                            # 画像を表示（約15%サイズ：324pxの半分 = 162px）
+                            # 画像を表示（バイト読み込みで表示の安定化。約15%サイズ = 162px）
                             scene_image_path = image_files.get(scene_key)
-                            if scene_image_path and scene_image_path.exists():
-                                # 画像を読み込んで表示（約15%サイズ：1080 * 0.15 = 162px）
+                            scene_image_bytes = _image_path_to_bytes(scene_image_path)
+                            if scene_image_bytes is not None:
                                 st.image(
-                                    str(scene_image_path),
+                                    scene_image_bytes,
                                     caption=f"シーン{scene_number}の画像",
                                     width=162
                                 )
                             else:
-                                st.warning(f"シーン{scene_number}の画像が見つかりません")
+                                st.warning(f"シーン{scene_number}の画像を読み込めません")
                             
                             # 現在の設定を取得（既にランダムに設定済み）
                             current_animation = st.session_state.video_animation_types.get(scene_key, None)
