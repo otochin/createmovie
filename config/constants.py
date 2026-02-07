@@ -12,18 +12,27 @@ OUTPUT_SCRIPTS_DIR = OUTPUT_DIR / "scripts"
 OUTPUT_AUDIO_DIR = OUTPUT_DIR / "audio"
 OUTPUT_IMAGES_DIR = OUTPUT_DIR / "images"
 OUTPUT_VIDEOS_DIR = OUTPUT_DIR / "videos"
+OUTPUT_STOCK_IMAGES_LONG_DIR = OUTPUT_DIR / "stock_images_long"
+OUTPUT_BGVIDEOS_LONG_DIR = OUTPUT_DIR / "bgvideos_long"
+OUTPUT_IMAGES_LONG_DIR = OUTPUT_DIR / "images_long"
 
-# 動画設定
+# 動画設定（ショート: 9:16）
 VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
 VIDEO_FPS = 30
 VIDEO_BITRATE = 8000000  # 8Mbps
 VIDEO_ASPECT_RATIO = (9, 16)  # 9:16
 
+# 動画設定（長尺: 16:9）
+VIDEO_WIDTH_LONG = 1920
+VIDEO_HEIGHT_LONG = 1080
+VIDEO_ASPECT_RATIO_LONG = (16, 9)  # 16:9
+
 # OpenAI設定
 OPENAI_MODEL = "gpt-4o"
 OPENAI_IMAGE_MODEL = "dall-e-3"
 OPENAI_IMAGE_SIZE = "1024x1792"  # 9:16形式に近いサイズ（DALL-E 3の最大サイズ）
+OPENAI_IMAGE_SIZE_LONG = "1792x1024"  # 16:9形式に近いサイズ（DALL-E 3）
 OPENAI_IMAGE_QUALITY = "standard"  # 標準品質設定
 OPENAI_IMAGE_STYLE = "vivid"  # 画像生成スタイル設定（vivid: 鮮やかで詳細、natural: 自然で写実的）
 

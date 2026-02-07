@@ -15,10 +15,13 @@ from config.constants import (
     OPENAI_MODEL,
     OPENAI_IMAGE_MODEL,
     OPENAI_IMAGE_SIZE,
+    OPENAI_IMAGE_SIZE_LONG,
     OPENAI_IMAGE_QUALITY,
     OPENAI_IMAGE_STYLE,
     VIDEO_WIDTH,
     VIDEO_HEIGHT,
+    VIDEO_WIDTH_LONG,
+    VIDEO_HEIGHT_LONG,
     IMAGE_FORMAT
 )
 from utils.file_manager import file_manager
@@ -218,7 +221,8 @@ class ImageGenerator:
         filename: Optional[str] = None,
         resize_to_video_size: bool = True,
         style_description: Optional[str] = None,
-        instruction: Optional[str] = None
+        instruction: Optional[str] = None,
+        is_long: bool = False
     ) -> Path:
         """
         プロンプトから画像ファイルを生成して保存
@@ -227,20 +231,26 @@ class ImageGenerator:
             prompt: 画像生成用プロンプト
             scene_number: シーン番号（ファイル名生成用）
             filename: ファイル名（Noneの場合は自動生成）
-            resize_to_video_size: 動画サイズ（1080x1920）にリサイズするか
+            resize_to_video_size: 動画サイズにリサイズするか
             style_description: 参考画像から抽出したスタイル説明（オプション）
             instruction: 追加の画像生成指示（オプション）
+            is_long: Trueの場合は長尺用（16:9, 1920x1080）で生成・保存
         
         Returns:
             Path: 保存された画像ファイルのパス
         """
-        # 画像を生成
-        image = self.generate_image(prompt, scene_number, style_description=style_description, instruction=instruction)
-        
+        # 画像を生成（長尺時はDALL-Eに横長サイズを指定）
+        image_size = OPENAI_IMAGE_SIZE_LONG if is_long else self.size
+        image = self.generate_image(
+            prompt, scene_number, size=image_size,
+            style_description=style_description, instruction=instruction
+        )
+
         # 動画サイズにリサイズ（必要に応じて）
         if resize_to_video_size:
-            image = self._resize_to_video_size(image)
-        
+            target = (VIDEO_WIDTH_LONG, VIDEO_HEIGHT_LONG) if is_long else (VIDEO_WIDTH, VIDEO_HEIGHT)
+            image = self._resize_to_video_size(image, target_size=target)
+
         # ファイル名を生成
         if filename is None:
             filename = file_manager.generate_filename(
@@ -248,9 +258,12 @@ class ImageGenerator:
                 extension=IMAGE_FORMAT,
                 scene_number=scene_number
             )
-        
-        # ファイルパスを取得
-        filepath = file_manager.get_image_path(filename)
+
+        # ファイルパスを取得（長尺時は output/images_long/）
+        if is_long:
+            filepath = file_manager.images_long_dir / filename
+        else:
+            filepath = file_manager.get_image_path(filename)
         
         # ファイルに保存
         try:
@@ -262,29 +275,33 @@ class ImageGenerator:
             logger.error(f"画像ファイルの保存に失敗しました: {e}")
             raise
     
-    def _resize_to_video_size(self, image: Image.Image) -> Image.Image:
+    def _resize_to_video_size(
+        self, image: Image.Image, target_size: Optional[tuple[int, int]] = None
+    ) -> Image.Image:
         """
-        画像を動画サイズ（1080x1920）にリサイズ
+        画像を動画サイズにリサイズ
         
         Args:
             image: 元の画像
+            target_size: (幅, 高さ)。Noneの場合はショート(1080x1920)
         
         Returns:
             Image.Image: リサイズされた画像
         """
-        target_size = (VIDEO_WIDTH, VIDEO_HEIGHT)
-        
+        if target_size is None:
+            target_size = (VIDEO_WIDTH, VIDEO_HEIGHT)
+
         # アスペクト比を維持しながらリサイズ
         image.thumbnail(target_size, Image.Resampling.LANCZOS)
-        
-        # 背景を黒で埋める（9:16形式）
+
+        # 背景を黒で埋める
         resized_image = Image.new("RGB", target_size, (0, 0, 0))
-        
+
         # 画像を中央に配置
         x_offset = (target_size[0] - image.size[0]) // 2
         y_offset = (target_size[1] - image.size[1]) // 2
         resized_image.paste(image, (x_offset, y_offset))
-        
+
         return resized_image
     
     def generate_script_images(
@@ -292,7 +309,8 @@ class ImageGenerator:
         script_data: dict,
         resize_to_video_size: bool = True,
         style_description: Optional[str] = None,
-        instruction: Optional[str] = None
+        instruction: Optional[str] = None,
+        is_long: bool = False
     ) -> dict[str, Path]:
         """
         台本の全シーンの画像を生成
@@ -302,6 +320,7 @@ class ImageGenerator:
             resize_to_video_size: 動画サイズにリサイズするか
             style_description: 参考画像から抽出したスタイル説明（オプション）
             instruction: 追加の画像生成指示（オプション）
+            is_long: Trueの場合は長尺用（16:9）で生成・保存
         
         Returns:
             dict[str, Path]: {シーン番号: ファイルパス}の辞書
@@ -325,7 +344,8 @@ class ImageGenerator:
                     scene_number=scene_number,
                     resize_to_video_size=resize_to_video_size,
                     style_description=style_description,
-                    instruction=instruction
+                    instruction=instruction,
+                    is_long=is_long
                 )
                 image_files[str(scene_number)] = filepath
                 logger.info(f"シーン{scene_number}の画像生成が完了しました")

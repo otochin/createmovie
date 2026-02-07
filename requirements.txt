@@ -10,8 +10,9 @@ openai>=1.3.0
 # ElevenLabs API (音声生成)
 elevenlabs>=0.2.26
 
-# 動画編集
-moviepy>=1.0.3
+# 動画編集（2.x では moviepy.editor が廃止されているため 1.x に固定）
+# oldname= エラーが出る場合: python scripts/patch_moviepy.py を実行
+moviepy>=1.0.3,<2.0
 
 # 画像処理
 Pillow>=10.0.0

@@ -11,8 +11,27 @@ from images.image_generator import ImageGenerator
 from images.image_processor import ImageProcessor
 from utils.file_manager import file_manager
 from utils.logger import get_logger
+from ui.pages.video_page import get_cookie_manager, load_video_settings_from_cookie, save_video_settings_to_cookie
 
 logger = get_logger(__name__)
+
+
+def _normalize_image_path(image_path):  # str | Path -> Path
+    """セッションやマッピングで str になっている場合に Path に統一する"""
+    if image_path is None:
+        return None
+    return Path(image_path) if not isinstance(image_path, Path) else image_path
+
+
+def _read_image_bytes(image_path):
+    """画像をバイト列で読み込む。表示の安定性のためファイルから直接読む。存在しない場合は None"""
+    path = _normalize_image_path(image_path)
+    if path is None or not path.exists():
+        return None
+    try:
+        return path.read_bytes()
+    except Exception:
+        return None
 
 
 def show_image_page():
@@ -134,6 +153,29 @@ def show_image_page():
     st.markdown("---")
     st.subheader("🎨 画像生成設定")
     
+    # 動画フォーマット（ショート / 長尺）。動画編集画面と共通の session_state.video_format を使用
+    if "video_format" not in st.session_state:
+        cookie_manager = get_cookie_manager()
+        saved = load_video_settings_from_cookie(cookie_manager)
+        st.session_state.video_format = saved.get("video_format", "short")
+    video_format_label = st.radio(
+        "動画フォーマット",
+        options=["ショート（9:16, 1080×1920）", "長尺（16:9, 1920×1080）"],
+        index=0 if st.session_state.video_format == "short" else 1,
+        horizontal=True,
+        key="image_format_radio",
+        help="ショートはYouTubeショート用、長尺は横型動画用です。動画編集画面と連動します。長尺時は output/stock_images_long/ の画像を紐づけ、output/images_long/ に保存します。"
+    )
+    new_format = "short" if "ショート" in video_format_label else "long"
+    if new_format != st.session_state.video_format:
+        st.session_state.video_format = new_format
+        # 動画編集画面のクッキーにも反映（ブラウザ再起動後も同じフォーマットになる）
+        cookie_manager = get_cookie_manager()
+        settings = load_video_settings_from_cookie(cookie_manager)
+        settings["video_format"] = st.session_state.video_format
+        save_video_settings_to_cookie(cookie_manager, settings)
+    is_long_format = st.session_state.video_format == "long"
+
     # 画像生成指示の入力
     image_instruction = st.text_area(
         "画像生成指示（オプション）",
@@ -143,9 +185,9 @@ def show_image_page():
     )
     
     resize_to_video_size = st.checkbox(
-        "動画サイズ（1080x1920）にリサイズ",
+        "動画サイズにリサイズ",
         value=True,
-        help="生成された画像を動画サイズに自動リサイズします"
+        help="生成された画像を動画サイズに自動リサイズします（ショート: 1080×1920、長尺: 1920×1080）"
     )
     
     st.markdown("---")
@@ -162,14 +204,15 @@ def show_image_page():
                         script_data=script_data,
                         resize_to_video_size=resize_to_video_size,
                         style_description=None,  # 参考画像の分析結果はプロンプトに含めない（参考のみ）
-                        instruction=image_instruction if image_instruction.strip() else None
+                        instruction=image_instruction if image_instruction.strip() else None,
+                        is_long=is_long_format
                     )
                     st.session_state.generated_images = image_files
                     
-                    # 画像マッピング情報を保存（台本ファイル名をキーとして）
+                    # 画像マッピング情報を保存（台本ファイル名をキーとして、長尺時は別ファイル）
                     try:
                         script_name = selected_script_name.replace(".json", "")
-                        file_manager.save_image_mapping(script_name, image_files)
+                        file_manager.save_image_mapping(script_name, image_files, is_long=is_long_format)
                     except Exception as e:
                         logger.warning(f"画像マッピングの保存に失敗しました: {e}")
                     
@@ -182,32 +225,39 @@ def show_image_page():
     
     with col2:
         if st.button("📂 ストック画像を紐づける", use_container_width=True):
-            # ストック画像の取得
-            stock_images = file_manager.list_stock_images()
+            # ストック画像の取得（フォーマットに応じてショート用 or 長尺用フォルダ）
+            if is_long_format:
+                stock_images = file_manager.list_stock_images_long()
+                stock_folder = "output/stock_images_long/"
+                images_output_dir = file_manager.images_long_dir
+            else:
+                stock_images = file_manager.list_stock_images()
+                stock_folder = "output/stock_images/"
+                images_output_dir = file_manager.images_dir
             
             if not stock_images:
-                st.error("❌ ストック画像がありません。`output/stock_images/` フォルダに画像を配置してください。")
+                st.error(f"❌ ストック画像がありません。{stock_folder} フォルダに画像を配置してください。")
             else:
-                # 既に割り当て済みのストック画像を取得
-                # セッションステートで使用済みのストック画像を追跡
-                if "used_stock_images" not in st.session_state:
-                    st.session_state.used_stock_images = set()
+                # 既に割り当て済みのストック画像を取得（フォーマット別に追跡）
+                used_key = "used_stock_images_long" if is_long_format else "used_stock_images"
+                if used_key not in st.session_state:
+                    st.session_state[used_key] = set()
+                used_set = st.session_state[used_key]
                 
                 # 既に割り当て済みの画像を除外
-                available_images = [
-                    img for img in stock_images 
-                    if img not in st.session_state.used_stock_images
-                ]
+                available_images = [img for img in stock_images if img not in used_set]
                 
                 if len(available_images) < len(scenes):
                     st.error(
                         f"❌ 未使用のストック画像が足りません。\n"
                         f"シーン数: {len(scenes)}、未使用のストック画像数: {len(available_images)}\n"
-                        f"（既に {len(st.session_state.used_stock_images)} 個の画像が使用済みです）"
+                        f"（既に {len(used_set)} 個の画像が使用済みです）"
                     )
                 else:
                     with st.spinner("ストック画像を紐づけ中..."):
                         try:
+                            # 出力先ディレクトリを確保
+                            file_manager.ensure_directory_exists(images_output_dir)
                             # 未使用の画像からランダムに選択（重複なし）
                             shuffled_images = random.sample(available_images, len(scenes))
                             
@@ -219,12 +269,12 @@ def show_image_page():
                                 stock_image_path = shuffled_images[i]
                                 
                                 # 使用済みとしてマーク
-                                st.session_state.used_stock_images.add(stock_image_path)
+                                used_set.add(stock_image_path)
                                 
                                 # 新しいファイル名を生成（拡張子は小文字に統一）
                                 extension = stock_image_path.suffix.lower()
                                 new_filename = f"image_scene{scene_number:03d}_{timestamp}{extension}"
-                                new_path = file_manager.images_dir / new_filename
+                                new_path = (images_output_dir / new_filename).resolve()
                                 
                                 # 画像をコピー
                                 shutil.copy2(stock_image_path, new_path)
@@ -233,10 +283,10 @@ def show_image_page():
                             
                             st.session_state.generated_images = assigned_images
                             
-                            # 画像マッピング情報を保存（台本ファイル名をキーとして）
+                            # 画像マッピング情報を保存（台本ファイル名をキーとして、長尺時は別ファイル）
                             try:
                                 script_name = selected_script_name.replace(".json", "")
-                                file_manager.save_image_mapping(script_name, assigned_images)
+                                file_manager.save_image_mapping(script_name, assigned_images, is_long=is_long_format)
                             except Exception as e:
                                 logger.warning(f"画像マッピングの保存に失敗しました: {e}")
                             
@@ -273,13 +323,15 @@ def show_image_page():
             
             with col1:
                 if is_generated:
-                    image_path = st.session_state.generated_images[scene_key]
-                    st.image(str(image_path), use_container_width=True)
-                    
-                    # 画像情報を表示
-                    processor = ImageProcessor()
-                    width, height = processor.get_image_size(image_path)
-                    st.caption(f"✅ 画像が生成されています: {image_path.name} ({width}x{height})")
+                    image_path = _normalize_image_path(st.session_state.generated_images[scene_key])
+                    image_bytes = _read_image_bytes(image_path)
+                    if image_bytes is not None:
+                        st.image(image_bytes, use_container_width=True)
+                        processor = ImageProcessor()
+                        width, height = processor.get_image_size(image_path)
+                        st.caption(f"✅ 画像が生成されています: {image_path.name} ({width}x{height})")
+                    else:
+                        st.warning(f"画像ファイルを読み込めません: {image_path}")
                 else:
                     st.info("まだ画像が生成されていません")
             
@@ -293,17 +345,17 @@ def show_image_page():
                                 scene_number=scene_number,
                                 resize_to_video_size=resize_to_video_size,
                                 style_description=None,  # 参考画像の分析結果はプロンプトに含めない（参考のみ）
-                                instruction=image_instruction if image_instruction.strip() else None
+                                instruction=image_instruction if image_instruction.strip() else None,
+                                is_long=is_long_format
                             )
                             st.session_state.generated_images[scene_key] = image_path
                             
-                            # 画像マッピング情報を更新（台本ファイル名をキーとして）
+                            # 画像マッピング情報を更新（台本ファイル名をキーとして、長尺時は別ファイル）
                             try:
                                 script_name = selected_script_name.replace(".json", "")
-                                # 既存のマッピングを読み込んで更新
-                                existing_mapping = file_manager.load_image_mapping(script_name) or {}
+                                existing_mapping = file_manager.load_image_mapping(script_name, is_long=is_long_format) or {}
                                 existing_mapping[scene_key] = image_path
-                                file_manager.save_image_mapping(script_name, existing_mapping)
+                                file_manager.save_image_mapping(script_name, existing_mapping, is_long=is_long_format)
                             except Exception as e:
                                 logger.warning(f"画像マッピングの更新に失敗しました: {e}")
                             
@@ -314,36 +366,37 @@ def show_image_page():
                             st.error(f"❌ 画像生成に失敗しました: {e}")
                             logger.error(f"画像生成エラー: {e}")
     
-    # 生成された画像の一覧
+    # 生成された画像の一覧（シーン番号でソートして表示）
     if st.session_state.generated_images:
         st.markdown("---")
         st.subheader("📁 生成された画像ファイル")
-        
-        # 3列で表示（サムネイル形式）
+        sorted_items = sorted(
+            st.session_state.generated_images.items(),
+            key=lambda x: int(x[0]) if str(x[0]).isdigit() else 0
+        )
         cols = st.columns(3)
-        for idx, (scene_key, image_path) in enumerate(st.session_state.generated_images.items()):
+        for idx, (scene_key, image_path) in enumerate(sorted_items):
+            path = _normalize_image_path(image_path)
+            image_bytes = _read_image_bytes(path)
             with cols[idx % 3]:
                 st.markdown(f"**シーン {scene_key}**")
-                
-                # サムネイル表示（約30%サイズ、幅200px程度）
-                st.image(str(image_path), width=200)
-                
-                # 画像情報を表示
-                processor = ImageProcessor()
-                width, height = processor.get_image_size(image_path)
-                st.caption(f"{image_path.name}\n({width}x{height})")
-                
-                # 拡大表示用のexpander
-                with st.expander("🔍 拡大表示"):
-                    st.image(str(image_path), use_container_width=True)
-                
-                # ダウンロードボタン
-                with open(image_path, "rb") as f:
+                if image_bytes is not None:
+                    st.image(image_bytes, width=200)
+                    processor = ImageProcessor()
+                    width, height = processor.get_image_size(path)
+                    st.caption(f"{path.name}\n({width}x{height})")
+                    with st.expander("🔍 拡大表示"):
+                        st.image(image_bytes, use_container_width=True)
+                    ext = (path.suffix or ".png").lower().lstrip(".")
+                    mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
                     st.download_button(
                         label="⬇️ ダウンロード",
-                        data=f.read(),
-                        file_name=image_path.name,
-                        mime=f"image/{image_path.suffix[1:]}",
+                        data=image_bytes,
+                        file_name=path.name,
+                        mime=mime,
                         key=f"download_{scene_key}",
                         use_container_width=True
                     )
+                else:
+                    st.warning(f"画像を読み込めません: {path}")
+                    st.caption(f"パス: {path}")

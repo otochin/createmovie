@@ -59,6 +59,9 @@ class Config:
         self.output_videos_dir = self.output_dir / "videos"
         self.output_stock_images_dir = self.output_dir / "stock_images"
         self.output_bgvideos_dir = self.output_dir / "bgvideos"
+        self.output_stock_images_long_dir = self.output_dir / "stock_images_long"
+        self.output_bgvideos_long_dir = self.output_dir / "bgvideos_long"
+        self.output_images_long_dir = self.output_dir / "images_long"
         self.output_bgm_dir = self.output_dir / "bgm"
         
         # ログ設定
@@ -78,6 +81,9 @@ class Config:
             self.output_videos_dir,
             self.output_stock_images_dir,
             self.output_bgvideos_dir,
+            self.output_stock_images_long_dir,
+            self.output_bgvideos_long_dir,
+            self.output_images_long_dir,
             self.output_bgm_dir,
             self.log_dir,
         ]

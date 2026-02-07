@@ -14,15 +14,14 @@ try:
 except ImportError:
     pass
 
-from moviepy.editor import (
-    ImageClip,
-    AudioFileClip,
-    VideoFileClip,
-    CompositeVideoClip,
-    CompositeAudioClip,
-    concatenate_videoclips
-)
-from moviepy.video.fx import resize
+# editor 経由だと audio.fx.all → decorators の読み込みで環境によってはエラーになるため、
+# 必要最小限をサブモジュールから直接インポート
+from moviepy.video.VideoClip import ImageClip
+from moviepy.audio.io.AudioFileClip import AudioFileClip
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+from moviepy.audio.AudioClip import CompositeAudioClip
+from moviepy.video.compositing.concatenate import concatenate_videoclips
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
@@ -40,6 +39,8 @@ from config.config import config
 from config.constants import (
     VIDEO_WIDTH,
     VIDEO_HEIGHT,
+    VIDEO_WIDTH_LONG,
+    VIDEO_HEIGHT_LONG,
     VIDEO_FPS,
     VIDEO_BITRATE,
     VIDEO_FORMAT
@@ -75,7 +76,9 @@ class VideoEditor:
         animation_types: Optional[Dict[str, str]] = None,
         bgm_path: Optional[Path] = None,
         bgm_volume: float = 0.1,
-        progress_callback: Optional[Callable[[str, float], None]] = None
+        progress_callback: Optional[Callable[[str, float], None]] = None,
+        video_width: Optional[int] = None,
+        video_height: Optional[int] = None
     ) -> Path:
         """
         台本データから動画を生成
@@ -95,16 +98,23 @@ class VideoEditor:
             animation_types: {シーン番号: アニメーションタイプ}の辞書（Noneの場合はランダム）
             bgm_path: BGMファイルのパス（Noneの場合はBGMなし）
             bgm_volume: BGMの音量（0.0-1.0、デフォルト: 0.1）
+            video_width: 出力動画の幅（Noneの場合はショート 1080、長尺時は 1920）
+            video_height: 出力動画の高さ（Noneの場合はショート 1920、長尺時は 1080）
         
         Returns:
             Path: 生成された動画ファイルのパス
         """
         logger.info("動画生成を開始")
-        
+        # 動画サイズの設定（長尺指定時は 1920x1080、未指定時はショート 1080x1920）
+        if video_width is not None and video_height is not None:
+            self.width, self.height = video_width, video_height
+        else:
+            self.width, self.height = VIDEO_WIDTH, VIDEO_HEIGHT
+
         scenes = script_data.get("scenes", [])
         if not scenes:
             raise ValueError("台本にシーンがありません")
-        
+
         # 進捗管理
         # ステップ数の計算：シーン数 + 結合(1) + 背景動画(条件付き1) + BGM(条件付き1) + 書き出し(1)
         base_steps = len(scenes) + 1 + 1  # シーン数 + 結合 + 書き出し
@@ -132,7 +142,7 @@ class VideoEditor:
                 "stroke_color": "black",
                 "stroke_width": 2,
                 "method": "caption",
-                "size": (VIDEO_WIDTH - 100, None),
+                "size": (self.width - 100, None),
                 "align": "center"
             }
         

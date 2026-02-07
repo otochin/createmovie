@@ -12,7 +12,7 @@ import extra_streamlit_components as stx
 from video.video_editor import VideoEditor
 from utils.file_manager import file_manager
 from utils.logger import get_logger
-from config.constants import VIDEO_WIDTH
+from config.constants import VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_WIDTH_LONG, VIDEO_HEIGHT_LONG
 
 logger = get_logger(__name__)
 
@@ -86,6 +86,7 @@ def show_video_page():
             st.session_state.video_animation_types = saved_settings.get("animation_types", {})  # 個別アニメーション設定
             st.session_state.video_bgm_selected = saved_settings.get("bgm", "なし（BGMを使用しない）")
             st.session_state.video_bgm_volume = saved_settings.get("bgm_volume", 0.1)  # デフォルト：0.1
+            st.session_state.video_format = saved_settings.get("video_format", "short")
         else:
             # クッキーが読み込まれていない場合は、デフォルト値を設定
             st.session_state.video_add_subtitles = True
@@ -108,6 +109,7 @@ def show_video_page():
             else:
                 st.session_state.video_bgm_selected = "なし（BGMを使用しない）"
             st.session_state.video_bgm_volume = 0.1  # デフォルト：0.1
+            st.session_state.video_format = "short"
         st.session_state.video_settings_loaded = True
     
     # セッションステートの初期化
@@ -169,14 +171,6 @@ def show_video_page():
             
             st.session_state.current_script = script_data
             
-            # 画像マッピング情報を読み込み（存在する場合）
-            script_name = selected_script_name.replace(".json", "")
-            image_mapping = file_manager.load_image_mapping(script_name)
-            if image_mapping:
-                st.session_state.image_mapping = image_mapping
-            else:
-                st.session_state.image_mapping = None
-            
             # 台本情報を表示
             st.info(f"**タイトル**: {script_data.get('title', 'タイトルなし')} | **シーン数**: {len(scenes_list)}")
         
@@ -208,8 +202,29 @@ def show_video_page():
         logger.warning(f"台本にシーンがありません。台本データのキー: {list(script_data.keys())}")
         return
     
+    # 動画サイズ（フォーマット）の選択（必要なファイルの確認より前に表示）
+    if "video_format" not in st.session_state:
+        st.session_state.video_format = "short"
+    st.markdown("---")
+    st.subheader("📐 動画サイズ（画像・動画フォーマット）")
+    video_format_label = st.radio(
+        "フォーマット",
+        options=["ショート（9:16, 1080×1920）", "長尺（16:9, 1920×1080）"],
+        index=0 if st.session_state.video_format == "short" else 1,
+        horizontal=True,
+        key="video_format_radio",
+        help="ショートはYouTubeショート用縦型、長尺は横型の通常動画用です。"
+    )
+    st.session_state.video_format = "short" if "ショート" in video_format_label else "long"
+    is_long_format = st.session_state.video_format == "long"
+
     st.markdown("---")
     st.subheader("📦 必要なファイルの確認")
+    
+    # フォーマットに応じて画像マッピングと画像ディレクトリを選択
+    script_name = selected_script_name.replace(".json", "")
+    image_mapping = file_manager.load_image_mapping(script_name, is_long=is_long_format)
+    images_dir = file_manager.images_long_dir if is_long_format else file_manager.images_dir
     
     # 画像ファイルと音声ファイルの確認
     image_files: Dict[str, Path] = {}
@@ -224,8 +239,8 @@ def show_video_page():
         
         # まず画像マッピング情報から検索（画像生成画面で割り当てた画像を優先）
         found_image = None
-        if st.session_state.get("image_mapping") and scene_key in st.session_state.image_mapping:
-            mapped_image_path = st.session_state.image_mapping[scene_key]
+        if image_mapping and scene_key in image_mapping:
+            mapped_image_path = image_mapping[scene_key]
             if mapped_image_path.exists():
                 found_image = mapped_image_path
         
@@ -241,7 +256,7 @@ def show_video_page():
             ]
             
             for pattern in image_patterns:
-                matches = list(file_manager.images_dir.glob(pattern))
+                matches = list(images_dir.glob(pattern))
                 if matches:
                     # 最新のファイルを使用（複数ある場合）
                     found_image = sorted(matches, key=lambda x: x.stat().st_mtime, reverse=True)[0]
@@ -397,6 +412,8 @@ def show_video_page():
                 help="値が大きいほど字幕が上に移動します（0=画面最下部）"
             )
             
+            # フォーマットに応じた幅（字幕の折り返し用）
+            video_width_for_style = VIDEO_WIDTH_LONG if is_long_format else VIDEO_WIDTH
             subtitle_style = {
                 "fontsize": subtitle_fontsize,
                 "color": subtitle_color,
@@ -404,15 +421,22 @@ def show_video_page():
                 "stroke_color": subtitle_stroke_color,
                 "stroke_width": subtitle_stroke_width,
                 "method": "caption",
-                "size": (VIDEO_WIDTH - 100, None),
+                "size": (video_width_for_style - 100, None),
                 "align": "center"
             }
     
     st.markdown("---")
     st.subheader("🎥 背景動画設定")
     
-    # 背景動画の選択
-    bg_video_files = file_manager.list_bgvideos()
+    # 背景動画の選択（フォーマットに応じてショート用 or 長尺用フォルダ）
+    if is_long_format:
+        bg_video_files = file_manager.list_bgvideos_long()
+        bg_videos_dir = file_manager.bgvideos_long_dir
+        bg_folder_hint = "`output/bgvideos_long/`"
+    else:
+        bg_video_files = file_manager.list_bgvideos()
+        bg_videos_dir = file_manager.bgvideos_dir
+        bg_folder_hint = "`output/bgvideos/`"
     bg_video_path = None
     
     if bg_video_files:
@@ -428,16 +452,16 @@ def show_video_page():
             "背景動画を選択",
             options=bg_video_options,
             index=bg_video_options.index(saved_selection),
-            help="動画の背景でループ再生する動画を選択します。`output/bgvideos/`フォルダに動画を配置してください。"
+            help=f"動画の背景でループ再生する動画を選択します。{bg_folder_hint}フォルダに動画を配置してください。"
         )
         # 選択結果を保存
         st.session_state.video_bg_video_selected = selected_bg_video
         
         if selected_bg_video != "なし（背景動画を使用しない）":
-            bg_video_path = file_manager.bgvideos_dir / selected_bg_video
+            bg_video_path = bg_videos_dir / selected_bg_video
             st.info(f"✅ 背景動画: {selected_bg_video}")
     else:
-        st.info("💡 背景動画を使用するには、`output/bgvideos/`フォルダに動画ファイル（MP4等）を配置してください。")
+        st.info(f"💡 背景動画を使用するには、{bg_folder_hint}フォルダに動画ファイル（MP4等）を配置してください。")
     
     st.markdown("---")
     st.subheader("🎵 BGM設定")
@@ -651,7 +675,8 @@ def show_video_page():
         "animation_mode": st.session_state.video_animation_mode,
         "animation_types": st.session_state.video_animation_types,
         "bgm": st.session_state.video_bgm_selected,
-        "bgm_volume": st.session_state.video_bgm_volume
+        "bgm_volume": st.session_state.video_bgm_volume,
+        "video_format": st.session_state.video_format
     }
     save_video_settings_to_cookie(cookie_manager, current_settings)
     
@@ -670,6 +695,8 @@ def show_video_page():
         
         try:
             editor = st.session_state.video_editor
+            video_width = VIDEO_WIDTH_LONG if is_long_format else None
+            video_height = VIDEO_HEIGHT_LONG if is_long_format else None
             video_path = editor.create_video_from_script(
                 script_data=script_data,
                 image_files=image_files,
@@ -684,7 +711,9 @@ def show_video_page():
                 animation_types=animation_types if enable_animation else None,
                 bgm_path=bgm_path,
                 bgm_volume=st.session_state.video_bgm_volume,
-                progress_callback=update_progress
+                progress_callback=update_progress,
+                video_width=video_width,
+                video_height=video_height
             )
             
             st.session_state.generated_video = video_path

@@ -6,6 +6,45 @@
 
 ## 2026年
 
+### 2026-02-07 - 長尺動画対応、フォーマット連動、ストック画像表示改善、MoviePy対応
+
+#### 実施内容
+- 動画生成画面で長尺（16:9, 1920×1080）を選択可能に
+- 長尺用ストック画像（`output/stock_images_long`）・背景動画（`output/bgvideos_long`）の対応
+- 画像生成画面と動画編集画面で動画フォーマットを連動（同一セッション・クッキー）
+- ストック画像紐づけ後の画像が正しく表示されない事象の修正
+- MoviePy 2.x 環境でのインポートエラー対応（1.x 固定、サブモジュール直接インポート）
+
+#### 完了項目
+- [x] 動画サイズ選択（ショート 9:16 / 長尺 16:9）を動画編集画面に追加
+- [x] 長尺用ディレクトリ（stock_images_long, bgvideos_long, images_long）の追加と利用
+- [x] 画像・動画編集で共通の `video_format` とクッキー保存による連動
+- [x] ストック画像紐づけ時の出力ディレクトリ確保と絶対パス保存
+- [x] 生成画像一覧の表示をバイト読み込みに変更し、Path 正規化・存在確認を追加
+- [x] requirements で moviepy を 1.x に固定（`moviepy>=1.0.3,<2.0`）
+- [x] video_editor のインポートを `moviepy.editor` 経由からサブモジュール直接に変更（audio_video_fx エラー回避）
+- [x] MoviePy 1.x の `deprecated_version_of` キーワード引数エラー用パッチ（scripts/patch_moviepy.py）
+- [x] 動画編集画面の字幕スタイル用 VIDEO_WIDTH 未定義エラー修正
+
+#### 変更ファイル
+- `config/constants.py` - 長尺用定数・ディレクトリ定数
+- `config/config.py` - 長尺用出力ディレクトリ
+- `utils/file_manager.py` - list_stock_images_long, list_bgvideos_long, マッピング is_long 対応
+- `video/video_editor.py` - 解像度引数対応、moviepy サブモジュール直接インポート
+- `ui/pages/video_page.py` - 動画サイズ選択、長尺時の画像・背景動画・解像度
+- `ui/pages/image_page.py` - 動画フォーマット連動、長尺用ストック/保存、表示改善（_normalize_image_path, _read_image_bytes）、クッキー連携
+- `images/image_generator.py` - 長尺用 is_long 対応（サイズ・保存先）
+- `requirements.txt` - moviepy 1.x 固定、パッチ案内コメント
+- `scripts/patch_moviepy.py` - 新規（deprecated_version_of 呼び出しパッチ）
+- `docs/README_PLAN.md` - 長尺仕様・フォーマット連動・ストック画像表示の記述を追加・更新
+
+#### 備考
+- 長尺用フォルダは初回起動時に自動作成される
+- 画像生成で選んだフォーマットを動画編集で開くと同一フォーマットが選択された状態になる
+- 仕様書を更新済み
+
+---
+
 ### 2026-02-04 - 音声読み上げ用テキスト（dialogue_for_tts）をOpenAIの応答で取得するように変更
 
 #### 実施内容

@@ -24,6 +24,9 @@ class FileManager:
         self.videos_dir = config.output_videos_dir
         self.stock_images_dir = config.output_stock_images_dir
         self.bgvideos_dir = config.output_bgvideos_dir
+        self.stock_images_long_dir = config.output_stock_images_long_dir
+        self.bgvideos_long_dir = config.output_bgvideos_long_dir
+        self.images_long_dir = config.output_images_long_dir
         self.bgm_dir = config.output_bgm_dir
     
     def save_script(self, script_data: dict, filename: Optional[str] = None) -> Path:
@@ -133,7 +136,7 @@ class FileManager:
     def list_scripts(self) -> list[Path]:
         """
         保存されている台本ファイルのリストを取得
-        画像マッピングファイル（*_image_mapping.json）は除外する
+        画像マッピングファイル（*_image_mapping.json, *_image_mapping_long.json）は除外する
         
         Returns:
             list[Path]: 台本ファイルのパスのリスト
@@ -141,8 +144,9 @@ class FileManager:
         all_json_files = self.scripts_dir.glob("*.json")
         # 画像マッピングファイルを除外
         script_files = [
-            f for f in all_json_files 
+            f for f in all_json_files
             if not f.name.endswith("_image_mapping.json")
+            and not f.name.endswith("_image_mapping_long.json")
         ]
         return sorted(script_files, reverse=True)
     
@@ -194,18 +198,20 @@ class FileManager:
             files.extend(self.stock_images_dir.glob(ext))
         return sorted(files)
     
-    def save_image_mapping(self, script_name: str, image_mapping: dict) -> Path:
+    def save_image_mapping(self, script_name: str, image_mapping: dict, is_long: bool = False) -> Path:
         """
         画像マッピング情報をJSON形式で保存
         
         Args:
             script_name: 台本ファイル名（拡張子なし）
             image_mapping: {シーン番号: 画像ファイルパス}の辞書
+            is_long: Trueの場合は長尺動画用マッピング（*_image_mapping_long.json）
         
         Returns:
             Path: 保存されたファイルのパス
         """
-        mapping_filename = f"{script_name}_image_mapping.json"
+        suffix = "_image_mapping_long.json" if is_long else "_image_mapping.json"
+        mapping_filename = f"{script_name}{suffix}"
         mapping_path = self.scripts_dir / mapping_filename
         
         try:
@@ -224,17 +230,19 @@ class FileManager:
             logger.error(f"画像マッピングの保存に失敗しました: {e}")
             raise
     
-    def load_image_mapping(self, script_name: str) -> Optional[dict]:
+    def load_image_mapping(self, script_name: str, is_long: bool = False) -> Optional[dict]:
         """
         画像マッピング情報をJSON形式で読み込み
         
         Args:
             script_name: 台本ファイル名（拡張子なし）
+            is_long: Trueの場合は長尺動画用マッピング（*_image_mapping_long.json）を読み込む
         
         Returns:
             dict: {シーン番号: 画像ファイルパス}の辞書、見つからない場合はNone
         """
-        mapping_filename = f"{script_name}_image_mapping.json"
+        suffix = "_image_mapping_long.json" if is_long else "_image_mapping.json"
+        mapping_filename = f"{script_name}{suffix}"
         mapping_path = self.scripts_dir / mapping_filename
         
         if not mapping_path.exists():
@@ -258,7 +266,7 @@ class FileManager:
     
     def list_bgvideos(self) -> list[Path]:
         """
-        背景動画ファイルのリストを取得
+        背景動画ファイルのリストを取得（ショート用: output/bgvideos/）
         
         Returns:
             list[Path]: 背景動画ファイルのパスのリスト
@@ -267,6 +275,36 @@ class FileManager:
         files = []
         for ext in extensions:
             files.extend(self.bgvideos_dir.glob(ext))
+        return sorted(files)
+
+    def list_stock_images_long(self) -> list[Path]:
+        """
+        長尺動画用ストック画像ファイルのリストを取得（output/stock_images_long/）
+        
+        Returns:
+            list[Path]: ストック画像ファイルのパスのリスト
+        """
+        if not self.stock_images_long_dir.exists():
+            return []
+        extensions = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"]
+        files = []
+        for ext in extensions:
+            files.extend(self.stock_images_long_dir.glob(ext))
+        return sorted(files)
+
+    def list_bgvideos_long(self) -> list[Path]:
+        """
+        長尺動画用背景動画ファイルのリストを取得（output/bgvideos_long/）
+        
+        Returns:
+            list[Path]: 背景動画ファイルのパスのリスト
+        """
+        if not self.bgvideos_long_dir.exists():
+            return []
+        extensions = ["*.mp4", "*.MP4", "*.mov", "*.MOV", "*.avi", "*.AVI"]
+        files = []
+        for ext in extensions:
+            files.extend(self.bgvideos_long_dir.glob(ext))
         return sorted(files)
     
     def list_bgm_files(self) -> list[Path]:
