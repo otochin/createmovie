@@ -1,0 +1,29 @@
+手順
+
+▼1.プロジェクトフォルダへ移動
+
+cd /Users/arie-yoshiaki/createmovie
+
+
+▼2.仮想環境を有効化（.venv を使っている場合）
+
+source .venv/bin/activate
+
+
+（README の venv の場合は source venv/bin/activate）
+▼3.Streamlit で起動
+
+streamlit run main.py
+
+
+（↑これで開くはず）
+
+
+
+
+▼4.（これはやらなくて良さそう）ポートを指定する場合（例: 8501）
+
+streamlit run main.py --server.port 8501
+
+
+起動するとターミナルに表示される URL（多くの場合 http://localhost:8501）をブラウザで開くとアプリが表示されます。
