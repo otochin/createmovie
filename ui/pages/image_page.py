@@ -1,12 +1,14 @@
 """
 画像生成ページ
 """
+import tempfile
 import streamlit as st
 import shutil
 import random
 from pathlib import Path
 from datetime import datetime
 
+from config.constants import VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_WIDTH_LONG, VIDEO_HEIGHT_LONG
 from images.image_generator import ImageGenerator
 from images.image_processor import ImageProcessor
 from utils.file_manager import file_manager
@@ -68,7 +70,6 @@ def show_image_page():
     
     if uploaded_file is not None:
         # アップロードされた画像を保存
-        import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
             tmp_file.write(uploaded_file.getvalue())
             tmp_path = Path(tmp_file.name)
@@ -237,66 +238,44 @@ def show_image_page():
             
             if not stock_images:
                 st.error(f"❌ ストック画像がありません。{stock_folder} フォルダに画像を配置してください。")
+            elif len(stock_images) < len(scenes):
+                st.error(
+                    f"❌ ストック画像が足りません。\n"
+                    f"シーン数: {len(scenes)}、ストック画像数: {len(stock_images)}\n"
+                    f"（今回の紐づけ内で重複なしに割り当てるため、シーン数以上の画像が必要です）"
+                )
             else:
-                # 既に割り当て済みのストック画像を取得（フォーマット別に追跡）
-                used_key = "used_stock_images_long" if is_long_format else "used_stock_images"
-                if used_key not in st.session_state:
-                    st.session_state[used_key] = set()
-                used_set = st.session_state[used_key]
-                
-                # 既に割り当て済みの画像を除外
-                available_images = [img for img in stock_images if img not in used_set]
-                
-                if len(available_images) < len(scenes):
-                    st.error(
-                        f"❌ 未使用のストック画像が足りません。\n"
-                        f"シーン数: {len(scenes)}、未使用のストック画像数: {len(available_images)}\n"
-                        f"（既に {len(used_set)} 個の画像が使用済みです）"
-                    )
-                else:
-                    with st.spinner("ストック画像を紐づけ中..."):
-                        try:
-                            # 出力先ディレクトリを確保
-                            file_manager.ensure_directory_exists(images_output_dir)
-                            # 未使用の画像からランダムに選択（重複なし）
-                            shuffled_images = random.sample(available_images, len(scenes))
-                            
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            assigned_images = {}
-                            
-                            for i, scene in enumerate(scenes):
-                                scene_number = scene.get("scene_number")
-                                stock_image_path = shuffled_images[i]
-                                
-                                # 使用済みとしてマーク
-                                used_set.add(stock_image_path)
-                                
-                                # 新しいファイル名を生成（拡張子は小文字に統一）
-                                extension = stock_image_path.suffix.lower()
-                                new_filename = f"image_scene{scene_number:03d}_{timestamp}{extension}"
-                                new_path = (images_output_dir / new_filename).resolve()
-                                
-                                # 画像をコピー
-                                shutil.copy2(stock_image_path, new_path)
-                                
-                                assigned_images[str(scene_number)] = new_path
-                            
-                            st.session_state.generated_images = assigned_images
-                            
-                            # 画像マッピング情報を保存（台本ファイル名をキーとして、長尺時は別ファイル）
-                            try:
-                                script_name = selected_script_name.replace(".json", "")
-                                file_manager.save_image_mapping(script_name, assigned_images, is_long=is_long_format)
-                            except Exception as e:
-                                logger.warning(f"画像マッピングの保存に失敗しました: {e}")
-                            
-                            st.success(f"✅ {len(assigned_images)}個のストック画像を紐づけました！")
-                            logger.info(f"ストック画像の紐づけが成功しました: {len(assigned_images)}個のファイル")
-                            st.rerun()
+                with st.spinner("ストック画像を紐づけ中..."):
+                    try:
+                        # 出力先ディレクトリを確保
+                        file_manager.ensure_directory_exists(images_output_dir)
+                        # ストック画像からランダムに選択（今回の紐づけ内で重複なし）
+                        shuffled_images = random.sample(stock_images, len(scenes))
                         
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        assigned_images = {}
+                        
+                        for i, scene in enumerate(scenes):
+                            scene_number = scene.get("scene_number")
+                            stock_image_path = shuffled_images[i]
+                            extension = stock_image_path.suffix.lower()
+                            new_filename = f"image_scene{scene_number:03d}_{timestamp}{extension}"
+                            new_path = (images_output_dir / new_filename).resolve()
+                            shutil.copy2(stock_image_path, new_path)
+                            assigned_images[str(scene_number)] = new_path
+                        
+                        st.session_state.generated_images = assigned_images
+                        try:
+                            script_name = selected_script_name.replace(".json", "")
+                            file_manager.save_image_mapping(script_name, assigned_images, is_long=is_long_format)
                         except Exception as e:
-                            st.error(f"❌ ストック画像の紐づけに失敗しました: {e}")
-                            logger.error(f"ストック画像紐づけエラー: {e}")
+                            logger.warning(f"画像マッピングの保存に失敗しました: {e}")
+                        st.success(f"✅ {len(assigned_images)}個のストック画像を紐づけました！")
+                        logger.info(f"ストック画像の紐づけが成功しました: {len(assigned_images)}個のファイル")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ ストック画像の紐づけに失敗しました: {e}")
+                        logger.error(f"ストック画像紐づけエラー: {e}")
     
     with col3:
         if st.button("🔄 クリア", use_container_width=True):
@@ -305,6 +284,20 @@ def show_image_page():
     
     st.markdown("---")
     st.subheader("📋 シーン別画像生成")
+    
+    images_output_dir = file_manager.images_long_dir if is_long_format else file_manager.images_dir
+    target_size = (VIDEO_WIDTH_LONG, VIDEO_HEIGHT_LONG) if is_long_format else (VIDEO_WIDTH, VIDEO_HEIGHT)
+    script_name = selected_script_name.replace(".json", "")
+    
+    # 表示のたびにマッピングを読み込み、generated_images を同期（2つ目以降が画面に反映されない問題の対策）
+    loaded_mapping = file_manager.load_image_mapping(script_name, is_long=is_long_format)
+    if loaded_mapping:
+        st.session_state.generated_images = {str(k): v for k, v in loaded_mapping.items()}
+    else:
+        st.session_state.generated_images = {}
+    
+    # 全シーンの「画像を指定」でアップロードされたファイルをいったん収集し、ループ後に一括処理する（2件目以降が消える問題の対策）
+    uploads_to_process = []
     
     # 各シーンの画像生成
     for scene in scenes:
@@ -344,27 +337,61 @@ def show_image_page():
                                 prompt=image_prompt,
                                 scene_number=scene_number,
                                 resize_to_video_size=resize_to_video_size,
-                                style_description=None,  # 参考画像の分析結果はプロンプトに含めない（参考のみ）
+                                style_description=None,
                                 instruction=image_instruction if image_instruction.strip() else None,
                                 is_long=is_long_format
                             )
                             st.session_state.generated_images[scene_key] = image_path
-                            
-                            # 画像マッピング情報を更新（台本ファイル名をキーとして、長尺時は別ファイル）
                             try:
-                                script_name = selected_script_name.replace(".json", "")
                                 existing_mapping = file_manager.load_image_mapping(script_name, is_long=is_long_format) or {}
                                 existing_mapping[scene_key] = image_path
                                 file_manager.save_image_mapping(script_name, existing_mapping, is_long=is_long_format)
                             except Exception as e:
                                 logger.warning(f"画像マッピングの更新に失敗しました: {e}")
-                            
                             st.success(f"✅ 画像を生成しました！")
                             st.rerun()
-                        
                         except Exception as e:
                             st.error(f"❌ 画像生成に失敗しました: {e}")
                             logger.error(f"画像生成エラー: {e}")
+                # クリックでそのままファイル選択ダイアログが開く（ボタン不要）
+                uploaded = st.file_uploader(
+                    "画像を指定（クリックでファイルを選択）",
+                    type=["png", "jpg", "jpeg"],
+                    key=f"upload_scene_{scene_number}",
+                    label_visibility="visible"
+                )
+                if uploaded is not None:
+                    uploads_to_process.append((scene_key, scene_number, uploaded))
+    
+    # 収集したアップロードを一括処理（2件目以降も確実にマッピングに反映）
+    if uploads_to_process:
+        try:
+            file_manager.ensure_directory_exists(images_output_dir)
+            existing_mapping = file_manager.load_image_mapping(script_name, is_long=is_long_format) or {}
+            processor = ImageProcessor()
+            for scene_key, scene_number, uploaded in uploads_to_process:
+                bytes_data = uploaded.getvalue()
+                ext = Path(uploaded.name).suffix.lower() if uploaded.name else ".png"
+                if ext not in [".png", ".jpg", ".jpeg"]:
+                    ext = ".png"
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                new_filename = f"image_scene{scene_number:03d}_{timestamp}{ext}"
+                final_path = (images_output_dir / new_filename).resolve()
+                with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                    tmp.write(bytes_data)
+                    tmp_path = Path(tmp.name)
+                try:
+                    final_path = processor.resize_to_video_size(tmp_path, output_path=final_path, target_size=target_size)
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+                existing_mapping[scene_key] = final_path
+            file_manager.save_image_mapping(script_name, existing_mapping, is_long=is_long_format)
+            st.session_state.generated_images = {str(k): v for k, v in existing_mapping.items()}
+            st.success(f"✅ {len(uploads_to_process)}件の画像を設定しました")
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ 画像の設定に失敗しました: {e}")
+            logger.error(f"画像指定エラー: {e}")
     
     # 生成された画像の一覧（シーン番号でソートして表示）
     if st.session_state.generated_images:

@@ -35,6 +35,8 @@ def show_script_page():
         st.session_state.extracted_insights = None
     if "extracted_knowledge" not in st.session_state:
         st.session_state.extracted_knowledge = None
+    if "extracted_core_part" not in st.session_state:
+        st.session_state.extracted_core_part = None
     if "script_edit_mode" not in st.session_state:
         st.session_state.script_edit_mode = False
     if "editing_script_path" not in st.session_state:
@@ -59,9 +61,16 @@ def show_script_page():
             height=150
         )
         
+        reference_script_core = st.text_area(
+            "参考台本核心部",
+            placeholder="参考台本のうち、核心部分だと思うセリフ・パートを貼り付けてください（オプション）\n\n例:\nつまり〇〇ということが言えるんです。...",
+            help="ここに入れた内容を手がかりに、参考台本から「核心部分」を抽出します。空欄の場合は参考台本全体から自動で抽出します。",
+            height=80
+        )
+        
         instruction = st.text_area(
             "台本生成指示",
-            value="- かわいい女性が読み上げるセリフにすること\n- 最初にオープニングと、最後にエンディングもつけること\n- 雑学の根拠や理由を深堀りして視聴者に教えてあげること\n- 今回のテーマの核心部分は動画の最後のほうで説明すること。動画の前半はできるだけ興味を引かせることに留めておき、核心部分は動画の後半で説明することで、なるべく動画を最後まで見てもらえるような台本構成にすること",
+            value="- かわいい女性が読み上げるセリフにすること\n- 最初にオープニングと、最後にエンディングもつけること\n- 最初のシーン（冒頭3〜5秒）では、問いかけ・驚き・共感の一言など、視聴者が離脱しないよう必ずフックを入れること\n- 雑学の根拠や理由を深堀りして視聴者に教えてあげること\n- 今回のテーマの核心部分は動画の最後のほうで説明すること。動画の前半はできるだけ興味を引かせることに留めておき、核心部分は動画の後半で説明することで、なるべく動画を最後まで見てもらえるような台本構成にすること",
             placeholder="台本生成時の特別な指示を入力してください（オプション）\n\n例:\n- 専門用語は避けて、わかりやすい言葉で説明してください\n- 冒頭で視聴者の注意を引くフックを入れてください\n- 各シーンで具体的な例を1つずつ挙げてください",
             help="台本生成時に考慮してほしい特別な指示や要件を入力できます",
             height=100
@@ -73,7 +82,7 @@ def show_script_page():
                 "動画の総時間（秒）",
                 min_value=15,
                 max_value=300,
-                value=60,
+                value=180,
                 step=5,
                 help="YouTubeショートは60秒以内が推奨です"
             )
@@ -83,7 +92,7 @@ def show_script_page():
                 "シーン数",
                 min_value=3,
                 max_value=20,
-                value=5,
+                value=18,
                 step=1,
                 help="シーン数を指定してください"
             )
@@ -91,6 +100,7 @@ def show_script_page():
         style = st.selectbox(
             "スタイル",
             ["エンターテイメント", "教育", "ニュース", "コメディ", "ドキュメンタリー", "その他"],
+            index=1,
             help="動画のスタイルを選択してください"
         )
         
@@ -109,12 +119,17 @@ def show_script_page():
             if reference_script and reference_script.strip():
                 with st.spinner("参考台本から視聴者インサイトと知識を抽出中..."):
                     try:
-                        extraction_result = generator.extract_insights_and_knowledge(reference_script)
+                        extraction_result = generator.extract_insights_and_knowledge(
+                            reference_script,
+                            reference_core_hint=reference_script_core.strip() if reference_script_core and reference_script_core.strip() else None
+                        )
                         extracted_insights = extraction_result.get("insights", [])
                         extracted_knowledge = extraction_result.get("knowledge", [])
+                        extracted_core_part = extraction_result.get("core_part", "") or ""
                         st.session_state.extracted_insights = extracted_insights
                         st.session_state.extracted_knowledge = extracted_knowledge
-                        st.success(f"✅ {len(extracted_insights)}個のインサイトと{len(extracted_knowledge)}個の知識を抽出しました")
+                        st.session_state.extracted_core_part = extracted_core_part
+                        st.success(f"✅ {len(extracted_insights)}個のインサイトと{len(extracted_knowledge)}個の知識と核心部分を抽出しました")
                     except Exception as e:
                         st.error(f"❌ インサイトと知識の抽出に失敗しました: {e}")
                         logger.error(f"インサイトと知識の抽出エラー: {e}")
@@ -122,6 +137,7 @@ def show_script_page():
             else:
                 st.session_state.extracted_insights = None
                 st.session_state.extracted_knowledge = None
+                st.session_state.extracted_core_part = None
             
             # 台本を生成
             with st.spinner("台本を生成中..."):
@@ -133,6 +149,8 @@ def show_script_page():
                     reference_script=reference_script if reference_script and reference_script.strip() else None,
                     insights=st.session_state.extracted_insights,
                     knowledge=st.session_state.extracted_knowledge,
+                    core_part=st.session_state.extracted_core_part,
+                    reference_core_hint=reference_script_core.strip() if reference_script_core and reference_script_core.strip() else None,
                     instruction=instruction if instruction and instruction.strip() else None
                 )
                 
@@ -163,8 +181,8 @@ def show_script_page():
             st.error(f"❌ 台本の生成に失敗しました: {e}")
             logger.error(f"台本生成エラー: {e}")
     
-    # 抽出されたインサイトと知識の表示
-    if st.session_state.extracted_insights or st.session_state.extracted_knowledge:
+    # 抽出されたインサイト・知識・核心部分の表示
+    if st.session_state.extracted_insights or st.session_state.extracted_knowledge or st.session_state.extracted_core_part:
         st.markdown("---")
         
         if st.session_state.extracted_insights:
@@ -177,6 +195,11 @@ def show_script_page():
             st.subheader("📚 抽出された知識")
             for i, knowledge_item in enumerate(st.session_state.extracted_knowledge, 1):
                 st.markdown(f"{i}. {knowledge_item}")
+        
+        if st.session_state.extracted_core_part:
+            st.markdown("---")
+            st.subheader("🎯 抽出された核心部分")
+            st.info(st.session_state.extracted_core_part)
     
     # 既存の台本を読み込んで編集
     st.markdown("---")
@@ -403,6 +426,34 @@ def show_script_page():
             st.markdown("---")
             st.markdown(f"**総時間**: {script_data.get('total_duration', 0):.1f}秒")
             st.markdown(f"**シーン数**: {len(script_data.get('scenes', []))}")
+            
+            # サムネイル用テキスト案（GPTで3案生成＋表示・コピー）
+            st.markdown("---")
+            st.subheader("🖼️ サムネイル用テキスト案")
+            st.caption("Canvaなどでサムネを作る際に載せる短いキャッチコピーの候補です。選択してコピーできます。")
+            if "thumbnail_suggestions" not in st.session_state:
+                st.session_state.thumbnail_suggestions = None
+            if "last_thumbnail_script_id" not in st.session_state:
+                st.session_state.last_thumbnail_script_id = None
+            current_script_id = f"{script_data.get('title', '')}_{len(script_data.get('scenes', []))}"
+            if st.session_state.last_thumbnail_script_id != current_script_id:
+                st.session_state.thumbnail_suggestions = None
+                st.session_state.last_thumbnail_script_id = current_script_id
+            if st.button("✨ 3案を生成", key="generate_thumbnail_suggestions", use_container_width=True):
+                try:
+                    generator = st.session_state.script_generator
+                    with st.spinner("サムネイル用テキスト案を生成中..."):
+                        st.session_state.thumbnail_suggestions = generator.generate_thumbnail_text_suggestions(script_data)
+                    st.success("✅ 3案を生成しました")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 生成に失敗しました: {e}")
+                    logger.error(f"サムネイルテキスト案生成エラー: {e}")
+            if st.session_state.thumbnail_suggestions:
+                for i, text in enumerate(st.session_state.thumbnail_suggestions, 1):
+                    with st.container():
+                        st.markdown(f"**案{i}**")
+                        st.code(text, language=None)
             
             # 各シーンの表示
             st.markdown("---")

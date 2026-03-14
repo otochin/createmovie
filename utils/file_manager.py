@@ -215,9 +215,9 @@ class FileManager:
         mapping_path = self.scripts_dir / mapping_filename
         
         try:
-            # パスを文字列に変換して保存
+            # パスを絶対パスの文字列に変換して保存（動画編集画面で確実に参照できるようにする）
             mapping_data = {
-                str(scene_key): str(image_path) 
+                str(scene_key): str(Path(image_path).resolve())
                 for scene_key, image_path in image_mapping.items()
             }
             
@@ -252,11 +252,16 @@ class FileManager:
             with open(mapping_path, "r", encoding="utf-8") as f:
                 mapping_data = json.load(f)
             
-            # 文字列をPathオブジェクトに変換
-            image_mapping = {
-                scene_key: Path(image_path_str)
-                for scene_key, image_path_str in mapping_data.items()
-            }
+            # 文字列をPathオブジェクトに変換（絶対パスに正規化して動画編集で確実に参照できるようにする）
+            image_mapping = {}
+            for scene_key, image_path_str in mapping_data.items():
+                p = Path(image_path_str)
+                if not p.is_absolute() and image_path_str:
+                    # 相対パスの場合は scripts の親（output）基準で解決
+                    p = (self.scripts_dir.parent / p).resolve()
+                else:
+                    p = p.resolve()
+                image_mapping[scene_key] = p
             
             logger.info(f"画像マッピングを読み込みました: {mapping_path}")
             return image_mapping
