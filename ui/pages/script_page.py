@@ -4,7 +4,7 @@
 import streamlit as st
 import json
 
-from scripts.script_generator import ScriptGenerator
+from scripts.script_generator import ScriptGenerator, normalize_reference_scripts_with_openai
 from scripts.script_validator import ScriptValidator
 from scripts.script_parser import ScriptParser
 from utils.file_manager import file_manager
@@ -43,68 +43,122 @@ def show_script_page():
         st.session_state.editing_script_path = None
     if "selected_script_for_edit" not in st.session_state:
         st.session_state.selected_script_for_edit = "選択してください..."
+
+    # 台本生成フォームの初期値（キーが無いときだけ初期化）
+    _default_instruction = "- かわいい女性が読み上げるセリフにすること\n- 最初にオープニングと、最後にエンディングもつけること\n- 最初のシーン（冒頭3〜5秒）では、問いかけ・驚き・共感の一言など、視聴者が離脱しないよう必ずフックを入れること\n- 雑学の根拠や理由を深堀りして視聴者に教えてあげること\n- 今回のテーマの核心部分は動画の最後のほうで説明すること。動画の前半はできるだけ興味を引かせることに留めておき、核心部分は動画の後半で説明することで、なるべく動画を最後まで見てもらえるような台本構成にすること"
+    _style_options = ["エンターテイメント", "教育", "ニュース", "コメディ", "ドキュメンタリー", "その他"]
+    if "script_page_topic" not in st.session_state:
+        st.session_state.script_page_topic = ""
+    if "script_page_reference_script" not in st.session_state:
+        st.session_state.script_page_reference_script = ""
+    if "script_page_reference_script_core" not in st.session_state:
+        st.session_state.script_page_reference_script_core = ""
+    if "script_page_reference_metadata" not in st.session_state:
+        st.session_state.script_page_reference_metadata = ""
+    if "script_page_instruction" not in st.session_state:
+        st.session_state.script_page_instruction = _default_instruction
+    if "script_page_duration" not in st.session_state:
+        st.session_state.script_page_duration = 180
+    if "script_page_num_scenes" not in st.session_state:
+        st.session_state.script_page_num_scenes = 18
+    if "script_page_style" not in st.session_state:
+        st.session_state.script_page_style = "教育"
+
+    # 動画検索から渡されたメタデータがあれば reference_metadata の初期値に使う（未入力時のみ）
+    if st.session_state.get("reference_metadata_from_search") and not st.session_state.script_page_reference_metadata:
+        st.session_state.script_page_reference_metadata = st.session_state.reference_metadata_from_search
+
+    # 入力欄
+    st.subheader("台本生成設定")
     
-    # 入力フォーム
-    with st.form("script_generation_form"):
-        st.subheader("台本生成設定")
-        
-        topic = st.text_input(
-            "トピック・テーマ",
-            placeholder="例: 人工知能の最新動向",
-            help="動画のテーマやトピックを入力してください"
+    topic = st.text_input(
+        "トピック・テーマ",
+        value=st.session_state.script_page_topic,
+        placeholder="例: 人工知能の最新動向",
+        help="動画のテーマやトピックを入力してください",
+        key="script_page_topic",
+    )
+    
+    reference_script = st.text_area(
+        "参考台本",
+        value=st.session_state.script_page_reference_script,
+        placeholder="参考にしたい台本を貼り付けてください（オプション）\n\n例:\nシーン1: 今日はAIの最新技術についてお話しします...",
+        help="参考にしたい台本を入力すると、視聴者のインサイトを抽出して、そのインサイトを満足させる台本を生成します",
+        height=150,
+        key="script_page_reference_script",
+    )
+    
+    reference_script_core = st.text_area(
+        "参考台本核心部",
+        value=st.session_state.script_page_reference_script_core,
+        placeholder="参考台本のうち、核心部分だと思うセリフ・パートを貼り付けてください（オプション）\n\n例:\nつまり〇〇ということが言えるんです。...",
+        help="ここに入れた内容を手がかりに、参考台本から「核心部分」を抽出します。空欄の場合は参考台本全体から自動で抽出します。",
+        height=80,
+        key="script_page_reference_script_core",
+    )
+
+    reference_metadata = st.text_area(
+        "人気動画のタイトル・概要（参考・オプション）",
+        value=st.session_state.script_page_reference_metadata,
+        placeholder="動画検索で「タイトル・概要をコピー」→「クリップボードにコピー」した内容をここに貼り付けてください（オプション）",
+        help="関連動画として認識されやすいように、重要キーワードや論点を title / description に自然に反映します（文言の丸ごとコピーはしません）。動画検索でコピーした場合はここに貼り付けてください。",
+        height=100,
+        key="script_page_reference_metadata",
+    )
+    
+    instruction = st.text_area(
+        "台本生成指示",
+        value=st.session_state.script_page_instruction,
+        placeholder="台本生成時の特別な指示を入力してください（オプション）\n\n例:\n- 専門用語は避けて、わかりやすい言葉で説明してください\n- 冒頭で視聴者の注意を引くフックを入れてください\n- 各シーンで具体的な例を1つずつ挙げてください",
+        help="台本生成時に考慮してほしい特別な指示や要件を入力できます",
+        height=100,
+        key="script_page_instruction",
+    )
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        duration = st.number_input(
+            "動画の総時間（秒）",
+            min_value=15,
+            max_value=300,
+            value=st.session_state.script_page_duration,
+            step=5,
+            help="YouTubeショートは60秒以内が推奨です",
+            key="script_page_duration",
         )
-        
-        reference_script = st.text_area(
-            "参考台本",
-            placeholder="参考にしたい台本を貼り付けてください（オプション）\n\n例:\nシーン1: 今日はAIの最新技術についてお話しします...",
-            help="参考にしたい台本を入力すると、視聴者のインサイトを抽出して、そのインサイトを満足させる台本を生成します",
-            height=150
+    
+    with col2:
+        num_scenes = st.number_input(
+            "シーン数",
+            min_value=3,
+            max_value=20,
+            value=st.session_state.script_page_num_scenes,
+            step=1,
+            help="シーン数を指定してください",
+            key="script_page_num_scenes",
         )
-        
-        reference_script_core = st.text_area(
-            "参考台本核心部",
-            placeholder="参考台本のうち、核心部分だと思うセリフ・パートを貼り付けてください（オプション）\n\n例:\nつまり〇〇ということが言えるんです。...",
-            help="ここに入れた内容を手がかりに、参考台本から「核心部分」を抽出します。空欄の場合は参考台本全体から自動で抽出します。",
-            height=80
-        )
-        
-        instruction = st.text_area(
-            "台本生成指示",
-            value="- かわいい女性が読み上げるセリフにすること\n- 最初にオープニングと、最後にエンディングもつけること\n- 最初のシーン（冒頭3〜5秒）では、問いかけ・驚き・共感の一言など、視聴者が離脱しないよう必ずフックを入れること\n- 雑学の根拠や理由を深堀りして視聴者に教えてあげること\n- 今回のテーマの核心部分は動画の最後のほうで説明すること。動画の前半はできるだけ興味を引かせることに留めておき、核心部分は動画の後半で説明することで、なるべく動画を最後まで見てもらえるような台本構成にすること",
-            placeholder="台本生成時の特別な指示を入力してください（オプション）\n\n例:\n- 専門用語は避けて、わかりやすい言葉で説明してください\n- 冒頭で視聴者の注意を引くフックを入れてください\n- 各シーンで具体的な例を1つずつ挙げてください",
-            help="台本生成時に考慮してほしい特別な指示や要件を入力できます",
-            height=100
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            duration = st.number_input(
-                "動画の総時間（秒）",
-                min_value=15,
-                max_value=300,
-                value=180,
-                step=5,
-                help="YouTubeショートは60秒以内が推奨です"
-            )
-        
-        with col2:
-            num_scenes = st.number_input(
-                "シーン数",
-                min_value=3,
-                max_value=20,
-                value=18,
-                step=1,
-                help="シーン数を指定してください"
-            )
-        
-        style = st.selectbox(
-            "スタイル",
-            ["エンターテイメント", "教育", "ニュース", "コメディ", "ドキュメンタリー", "その他"],
-            index=1,
-            help="動画のスタイルを選択してください"
-        )
-        
-        submitted = st.form_submit_button("🚀 台本を生成", use_container_width=True)
+    
+    _style_index = _style_options.index(st.session_state.script_page_style) if st.session_state.script_page_style in _style_options else 1
+    style = st.selectbox(
+        "スタイル",
+        _style_options,
+        index=_style_index,
+        help="動画のスタイルを選択してください",
+        key="script_page_style",
+    )
+    
+    submitted = st.button("🚀 台本を生成", use_container_width=True)
+    
+    # ボタン押下時は session_state の最新値を変数に反映（key 付きウィジェットは既に session_state を更新済み）
+    if submitted:
+        topic = st.session_state.script_page_topic
+        reference_script = st.session_state.script_page_reference_script
+        reference_script_core = st.session_state.script_page_reference_script_core
+        reference_metadata = st.session_state.script_page_reference_metadata
+        instruction = st.session_state.script_page_instruction
+        duration = st.session_state.script_page_duration
+        num_scenes = st.session_state.script_page_num_scenes
+        style = st.session_state.script_page_style
     
     # 台本生成処理
     if submitted:
@@ -114,14 +168,51 @@ def show_script_page():
         
         try:
             generator = st.session_state.script_generator
-            
-            # 参考台本がある場合は、まずインサイトと知識を抽出
-            if reference_script and reference_script.strip():
+            cleaned_reference_script = reference_script.strip() if reference_script and reference_script.strip() else ""
+            cleaned_reference_script_core = reference_script_core.strip() if reference_script_core and reference_script_core.strip() else None
+
+            # 整えた参考台本の表示用（今回参考台本が無い場合はクリア）
+            st.session_state.normalized_reference_script = None
+            st.session_state.normalized_reference_script_core = None
+
+            # 参考台本がある場合: OpenAIで性教育動画台本として整える前処理（誤字脱字・タイムスタンプ・[音楽]等除去）
+            if cleaned_reference_script:
+                with st.spinner("参考台本を整えています（誤字脱字・不要表記の除去）..."):
+                    try:
+                        normalizer = getattr(generator, "normalize_reference_scripts", None)
+                        if callable(normalizer):
+                            normalized = normalizer(
+                                topic=topic,
+                                reference_script=cleaned_reference_script,
+                                reference_script_core=cleaned_reference_script_core
+                            )
+                        else:
+                            normalized = normalize_reference_scripts_with_openai(
+                                generator.client,
+                                generator.model,
+                                topic,
+                                cleaned_reference_script,
+                                cleaned_reference_script_core
+                            )
+                        cleaned_reference_script = normalized.get("reference_script", "").strip()
+                        cleaned_reference_script_core = normalized.get("reference_script_core")
+                        if cleaned_reference_script_core is not None:
+                            cleaned_reference_script_core = cleaned_reference_script_core.strip() or None
+                        st.session_state.normalized_reference_script = cleaned_reference_script
+                        st.session_state.normalized_reference_script_core = cleaned_reference_script_core
+                        st.success("✅ 参考台本を整えました")
+                    except Exception as e:
+                        st.error(f"❌ 参考台本の整えに失敗しました: {e}")
+                        logger.error(f"参考台本正規化エラー: {e}")
+                        return
+
+            # 参考台本がある場合は、整えたテキストでインサイトと知識を抽出
+            if cleaned_reference_script:
                 with st.spinner("参考台本から視聴者インサイトと知識を抽出中..."):
                     try:
                         extraction_result = generator.extract_insights_and_knowledge(
-                            reference_script,
-                            reference_core_hint=reference_script_core.strip() if reference_script_core and reference_script_core.strip() else None
+                            cleaned_reference_script,
+                            reference_core_hint=cleaned_reference_script_core
                         )
                         extracted_insights = extraction_result.get("insights", [])
                         extracted_knowledge = extraction_result.get("knowledge", [])
@@ -138,25 +229,59 @@ def show_script_page():
                 st.session_state.extracted_insights = None
                 st.session_state.extracted_knowledge = None
                 st.session_state.extracted_core_part = None
-            
-            # 台本を生成
+
+            # 台本を生成（整えた参考台本・核心部を使用）
             with st.spinner("台本を生成中..."):
                 script_data = generator.generate_script(
                     topic=topic,
                     duration=duration,
                     num_scenes=num_scenes,
                     style=style,
-                    reference_script=reference_script if reference_script and reference_script.strip() else None,
+                    reference_script=cleaned_reference_script if cleaned_reference_script else None,
                     insights=st.session_state.extracted_insights,
                     knowledge=st.session_state.extracted_knowledge,
                     core_part=st.session_state.extracted_core_part,
-                    reference_core_hint=reference_script_core.strip() if reference_script_core and reference_script_core.strip() else None,
-                    instruction=instruction if instruction and instruction.strip() else None
+                    reference_core_hint=cleaned_reference_script_core,
+                    instruction=instruction if instruction and instruction.strip() else None,
+                    reference_metadata=reference_metadata if reference_metadata and reference_metadata.strip() else None
                 )
                 
                 # 検証と正規化
                 script_data = ScriptParser.validate_and_normalize(script_data)
-                
+                # 台本ファイルに保存する追加項目（音声・画像・動画編集画面で表示するため）
+                script_data["topic"] = topic
+                script_data["reference_script_normalized"] = cleaned_reference_script or ""
+                script_data["reference_script_core_normalized"] = (cleaned_reference_script_core or "").strip() or ""
+                script_data["reference_metadata"] = (reference_metadata or "").strip() or ""
+                # タグは「人気動画のタイトル・概要（参考）」のみから抽出する
+                if (reference_metadata or "").strip():
+                    with st.spinner("人気動画のタイトル・概要からタグを抽出中..."):
+                        try:
+                            script_data["suggested_tags"] = generator.extract_tags_from_reference_metadata(
+                                (reference_metadata or "").strip()
+                            )
+                        except Exception as e:
+                            logger.warning(f"タグの抽出に失敗しました: {e}")
+                            script_data["suggested_tags"] = []
+                else:
+                    script_data["suggested_tags"] = []
+                # 人気動画のタイトル・概要を参考にしたタイトル案・概要案を生成して保存
+                if (reference_metadata or "").strip():
+                    with st.spinner("人気動画を参考にタイトル・概要案を生成中..."):
+                        try:
+                            suggestions = generator.generate_title_description_suggestions(
+                                script_data, (reference_metadata or "").strip()
+                            )
+                            script_data["suggested_title_from_reference"] = suggestions.get("suggested_title_from_reference", "") or ""
+                            script_data["suggested_description_from_reference"] = suggestions.get("suggested_description_from_reference", "") or ""
+                        except Exception as e:
+                            logger.warning(f"タイトル・概要案の生成に失敗しました: {e}")
+                            script_data["suggested_title_from_reference"] = ""
+                            script_data["suggested_description_from_reference"] = ""
+                else:
+                    script_data["suggested_title_from_reference"] = ""
+                    script_data["suggested_description_from_reference"] = ""
+
                 # セッションステートに保存
                 st.session_state.script_data = script_data
                 
@@ -181,6 +306,30 @@ def show_script_page():
             st.error(f"❌ 台本の生成に失敗しました: {e}")
             logger.error(f"台本生成エラー: {e}")
     
+    # 整えた参考台本・参考台本核心部の表示
+    if st.session_state.get("normalized_reference_script") or st.session_state.get("normalized_reference_script_core"):
+        st.markdown("---")
+        st.subheader("📋 整えた参考台本（性教育動画台本として整形済み）")
+        if st.session_state.get("normalized_reference_script"):
+            st.text_area(
+                "整えた参考台本",
+                value=st.session_state.normalized_reference_script,
+                height=200,
+                disabled=True,
+                key="display_normalized_script",
+                label_visibility="collapsed"
+            )
+        if st.session_state.get("normalized_reference_script_core"):
+            st.markdown("**整えた参考台本核心部**")
+            st.text_area(
+                "整えた参考台本核心部",
+                value=st.session_state.normalized_reference_script_core,
+                height=120,
+                disabled=True,
+                key="display_normalized_core",
+                label_visibility="collapsed"
+            )
+
     # 抽出されたインサイト・知識・核心部分の表示
     if st.session_state.extracted_insights or st.session_state.extracted_knowledge or st.session_state.extracted_core_part:
         st.markdown("---")
@@ -454,6 +603,33 @@ def show_script_page():
                     with st.container():
                         st.markdown(f"**案{i}**")
                         st.code(text, language=None)
+
+            # タグ案（台本生成時に suggested_tags があれば表示）
+            if script_data.get("suggested_tags"):
+                st.markdown("---")
+                st.subheader("🏷️ タグ案")
+                st.caption("アップロード時のタグ候補です（選択してコピーできます）。")
+                tags = script_data.get("suggested_tags") or []
+                if isinstance(tags, list) and tags:
+                    st.text_area(
+                        "タグ（改行区切り）",
+                        value="\n".join([str(t) for t in tags if str(t).strip()]),
+                        height=140,
+                    )
+
+            # 人気動画を参考にしたタイトル・概要案（台本ファイルに含まれる）
+            _st_ref = (script_data.get("suggested_title_from_reference") or "").strip()
+            _sd_ref = (script_data.get("suggested_description_from_reference") or "").strip()
+            if _st_ref or _sd_ref:
+                st.markdown("---")
+                st.subheader("📌 人気動画を参考にしたタイトル・概要案")
+                st.caption("「人気動画のタイトル・概要」を参考に生成した案です。アップロード時の候補として利用できます。")
+                if _st_ref:
+                    st.markdown("**タイトル案**")
+                    st.code(_st_ref, language=None)
+                if _sd_ref:
+                    st.markdown("**概要案**")
+                    st.text_area("", value=_sd_ref, height=80, disabled=True, key="script_page_desc_ref", label_visibility="collapsed")
             
             # 各シーンの表示
             st.markdown("---")

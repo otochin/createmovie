@@ -56,3 +56,13 @@ VIDEO_FORMAT = "mp4"
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_LEVEL = "INFO"
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# 動画検索（YouTube Data API v3）
+# 公開時期プリセット: (API用の値, 表示ラベル)
+YOUTUBE_SEARCH_PERIOD_PRESETS = [
+    ("24h", "直近24時間"),
+    ("7d", "直近7日間"),
+    ("30d", "直近30日間"),
+    ("3m", "直近3ヶ月"),
+]
+YOUTUBE_SEARCH_MAX_RESULTS = 25

@@ -21,6 +21,9 @@ Pillow>=10.0.0
 requests>=2.31.0
 httpx>=0.25.0
 
+# YouTube 文字起こし（字幕がある動画のみ取得）
+youtube-transcript-api>=1.0.0
+
 # 環境変数管理
 python-dotenv>=1.0.0
 

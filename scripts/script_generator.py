@@ -14,6 +14,93 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def normalize_reference_scripts_with_openai(
+    client,
+    model: str,
+    topic: str,
+    reference_script: str,
+    reference_script_core: Optional[str] = None
+) -> dict:
+    """
+    OpenAIで参考台本・参考台本核心部を性教育動画の台本として整える。
+    誤字脱字の修正、タイムスタンプ・[音楽]などの不要テキストの除去を行う。
+
+    Args:
+        client: OpenAI クライアント
+        model: モデル名
+        topic: トピック・テーマ
+        reference_script: 参考台本の生テキスト
+        reference_script_core: 参考台本核心部の生テキスト（オプション）
+
+    Returns:
+        dict: {"reference_script": str, "reference_script_core": str or None}
+    """
+    if not reference_script or not reference_script.strip():
+        return {"reference_script": "", "reference_script_core": (reference_script_core or "").strip() or None}
+
+    has_core = reference_script_core and reference_script_core.strip()
+    core_section = ""
+    if has_core:
+        core_section = f"""
+【参考台本核心部（ユーザー入力）】
+以下も同様に、性教育動画の台本として整え、誤字脱字・タイムスタンプ・[音楽]等の不要表記を除去したテキストに修正してください。
+
+{reference_script_core.strip()}
+"""
+
+    prompt = f"""
+【トピック・テーマ】
+{topic}
+
+【タスク】
+「参考台本」のテキストを、上記トピックに合わせた「性教育動画の台本」として整えてください。
+{core_section}
+
+【参考台本（ユーザー入力）】
+{reference_script.strip()}
+
+【整える際のルール】
+1. 誤字脱字を修正する
+2. タイムスタンプ（例: 0:00、1:23、(0:15) など）をすべて削除する
+3. [音楽]、[BGM]、[効果音] など、括弧で囲まれた演出指示・不要なテキストを削除する
+4. 内容は変えず、読みやすい台本テキストのみを残す
+5. 性教育動画として不自然でない言い回しに微修正してよい（事実は変えない）
+6. 出力は「整えた参考台本」と「整えた参考台本核心部」（核心部がある場合のみ）の2つ
+
+【出力形式】
+以下のJSON形式で出力してください。
+- reference_script: 整えた参考台本（1本のテキスト）
+- reference_script_core: 核心部を入力していた場合のみ、整えた参考台本核心部。なければ null
+
+{{
+  "reference_script": "整えた参考台本の全文",
+  "reference_script_core": "整えた参考台本核心部の全文"
+}}
+"""
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": "あなたは動画台本の編集者です。誤字脱字の修正と、タイムスタンプ・演出表記の除去を行い、正確な台本テキストに整えてください。"
+            },
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3,
+        response_format={"type": "json_object"}
+    )
+    data = json.loads(response.choices[0].message.content)
+    out_script = (data.get("reference_script") or "").strip()
+    out_core = data.get("reference_script_core")
+    if out_core is not None:
+        out_core = (out_core or "").strip() or None
+    if not has_core:
+        out_core = (reference_script_core or "").strip() or None
+    logger.info("参考台本の正規化が完了しました")
+    return {"reference_script": out_script, "reference_script_core": out_core}
+
+
 class ScriptGenerator:
     """台本生成クラス"""
     
@@ -25,6 +112,28 @@ class ScriptGenerator:
         self.model = OPENAI_MODEL
         # pykakasiの初期化（漢字→ひらがな変換用）
         self.kks = pykakasi.kakasi()
+
+    def normalize_reference_scripts(
+        self,
+        topic: str,
+        reference_script: str,
+        reference_script_core: Optional[str] = None
+    ) -> dict:
+        """
+        参考台本と参考台本核心部を、トピックに合わせた性教育動画の台本として整える前処理。
+        OpenAI で誤字脱字の修正、タイムスタンプ・[音楽]などの不要テキストの除去を行う。
+
+        Returns:
+            dict: {"reference_script": str, "reference_script_core": str or None}
+        """
+        return normalize_reference_scripts_with_openai(
+            self.client,
+            self.model,
+            topic,
+            reference_script,
+            reference_script_core
+        )
+
     
     def extract_insights_and_knowledge(self, reference_script: str, reference_core_hint: Optional[str] = None) -> dict:
         """
@@ -217,7 +326,124 @@ class ScriptGenerator:
         except Exception as e:
             logger.error(f"サムネイル用テキスト案の生成に失敗しました: {e}")
             raise
-    
+
+    def generate_title_description_suggestions(
+        self,
+        script_data: dict,
+        reference_metadata: str
+    ) -> dict:
+        """
+        人気動画のタイトル・概要（reference_metadata）だけを参考に、
+        表現を少し変えたタイトル案・概要案を1件ずつ生成する。本編の内容は参照しない。
+
+        Args:
+            script_data: 呼び出し互換用（プロンプトでは使用しない）
+            reference_metadata: 人気動画のタイトル・概要テキスト
+
+        Returns:
+            dict: {"suggested_title_from_reference": str, "suggested_description_from_reference": str}
+        """
+        if not (reference_metadata and reference_metadata.strip()):
+            return {"suggested_title_from_reference": "", "suggested_description_from_reference": ""}
+
+        prompt = f"""
+【人気動画のタイトル・概要（参考）】
+以下は、人気動画のタイトル・概要です。このテキスト**だけ**を材料にしてください。
+
+{reference_metadata.strip()}
+
+【タスク】
+上記「人気動画のタイトル・概要」の**内容のみ**を参考に、「タイトル案」と「概要案」を1つずつ作成してください。
+
+【重要なルール】
+- 本編の台本や動画の具体的な内容には一切触れないでください。参考にするのは上記のテキストのみです。
+- そのまま写すとパクリになるため、言い回し・語順・表現を必ず変えてください（意図やトーンは似せてよい）。
+- 同じキーワードやテーマは活かしつつ、別の言い方・言い換えにすること。
+
+【出力形式】
+以下のJSON形式のみで出力してください。
+{{"suggested_title_from_reference": "タイトル案（1本）", "suggested_description_from_reference": "概要案（1〜3文程度）"}}
+"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "あなたはYouTubeのタイトル・説明文の設計の専門家です。与えられた人気動画のタイトル・概要の「内容だけ」を参考に、表現を少し変えたタイトル案と概要案を作成してください。本編の内容は参照せず、パクリにならないよう言い回しを変えてください。"
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content
+            result = json.loads(content)
+            out_title = (result.get("suggested_title_from_reference") or "").strip()
+            out_desc = (result.get("suggested_description_from_reference") or "").strip()
+            logger.info("人気動画を参考にしたタイトル・概要案を生成しました")
+            return {"suggested_title_from_reference": out_title, "suggested_description_from_reference": out_desc}
+        except Exception as e:
+            logger.error(f"タイトル・概要案の生成に失敗しました: {e}")
+            raise
+
+    def extract_tags_from_reference_metadata(self, reference_metadata: str) -> list:
+        """
+        「人気動画のタイトル・概要（参考）」のテキストのみからタグを抽出する。
+        本編の内容は参照しない。
+
+        Args:
+            reference_metadata: 人気動画のタイトル・概要テキスト
+
+        Returns:
+            list: タグ文字列のリスト（10〜15個程度）
+        """
+        if not (reference_metadata and reference_metadata.strip()):
+            return []
+        prompt = f"""
+【人気動画のタイトル・概要（参考）】
+以下のテキスト**だけ**を材料にしてください。本編の台本や動画の内容は参照しないでください。
+
+{reference_metadata.strip()}
+
+【タスク】
+上記のテキストから、動画のアップロード時に使える「タグ」を 10〜15 個程度抽出してください。
+- キーワード・テーマ・検索されそうな語をタグにすること
+- 日本語中心、必要に応じて英語も可
+- 重複や冗長な表現は避ける
+- そのままの文言でも、少し言い換えた表現でもよい（パクリにならない程度に）
+
+【出力形式】
+以下のJSON形式のみで出力してください。
+{{"suggested_tags": ["タグ1", "タグ2", "タグ3", ...]}}
+"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "あなたは動画のメタデータ設計の専門家です。与えられた「人気動画のタイトル・概要」のテキストのみから、タグ候補を抽出してください。"
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.4,
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content
+            result = json.loads(content)
+            tags = result.get("suggested_tags", [])
+            if not isinstance(tags, list):
+                tags = []
+            out = [str(t).strip() for t in tags if str(t).strip()][:20]
+            logger.info(f"人気動画のタイトル・概要からタグを抽出しました: {len(out)}件")
+            return out
+        except Exception as e:
+            logger.error(f"タグの抽出に失敗しました: {e}")
+            raise
+
     def generate_script(
         self,
         topic: str,
@@ -229,7 +455,8 @@ class ScriptGenerator:
         knowledge: Optional[list[str]] = None,
         core_part: Optional[str] = None,
         reference_core_hint: Optional[str] = None,
-        instruction: Optional[str] = None
+        instruction: Optional[str] = None,
+        reference_metadata: Optional[str] = None
     ) -> dict:
         """
         台本を生成
@@ -287,7 +514,8 @@ class ScriptGenerator:
             insights=extracted_insights,
             knowledge=extracted_knowledge,
             core_part=extracted_core_part,
-            instruction=instruction
+            instruction=instruction,
+            reference_metadata=reference_metadata
         )
         
         try:
@@ -340,7 +568,8 @@ class ScriptGenerator:
         insights: Optional[list[str]] = None,
         knowledge: Optional[list[str]] = None,
         core_part: Optional[str] = None,
-        instruction: Optional[str] = None
+        instruction: Optional[str] = None,
+        reference_metadata: Optional[str] = None
     ) -> str:
         """
         プロンプトを作成
@@ -415,6 +644,24 @@ class ScriptGenerator:
 
 上記の指示を必ず反映させてください。
 """
+
+        # 人気動画のタイトル・概要（参考メタデータ）がある場合の追加指示
+        reference_metadata_text = ""
+        if reference_metadata and reference_metadata.strip():
+            reference_metadata_text = f"""
+
+【参考：人気動画のタイトル・概要（参考メタデータ）】
+以下は、参考として貼り付けられた「人気動画のタイトル・概要（冒頭）」です。
+この内容を参考に、同じテーマ・検索意図として認識されやすいように、重要キーワードや論点をあなたの台本（title/description）に自然に反映してください。
+
+【重要ルール】
+- 文言をそのままコピーしない（表現は必ず言い換える）
+- 重要キーワードは「title」と「description」の両方に自然に含める
+- スパムっぽくならないよう、不自然なキーワード羅列は避ける
+
+【参考メタデータ】
+{reference_metadata.strip()}
+"""
         
         prompt = f"""
 以下の条件でYouTubeショート動画の台本を作成してください。
@@ -425,14 +672,14 @@ class ScriptGenerator:
 - シーン数: {num_scenes}シーン
 - 1シーンあたりの時間: 約{scene_duration:.1f}秒
 - スタイル: {style}
-{insights_instruction}{knowledge_instruction}{core_part_instruction}{instruction_text}
+{insights_instruction}{knowledge_instruction}{core_part_instruction}{instruction_text}{reference_metadata_text}
 
 【出力形式】
 以下のJSON形式で出力してください：
 
 {{
   "title": "動画のタイトル",
-  "description": "動画の説明",
+  "description": "動画の説明（最初の1〜2文で、テーマと重要キーワードを明確に書いた後、補足説明を続ける）",
   "scenes": [
     {{
       "scene_number": 1,
@@ -455,6 +702,8 @@ class ScriptGenerator:
 
 【注意事項】
 - 各シーンのdialogueは、視聴者の興味を引く内容にしてください
+- title は短く強く、検索意図が一目で分かるようにしてください（重要キーワードを自然に含める）
+- description は「最初の1〜2文」でテーマ・重要キーワード・視聴者の得られる価値を明確に書き、その後に補足や詳細を続けてください
 - 各シーンのdialogueは、指定されたduration（{scene_duration:.1f}秒）に合わせて、適切な長さのセリフにしてください。目安として、1秒あたり約12〜16文字程度のセリフ量を目指してください（例：{scene_duration:.1f}秒のシーンなら約{int(scene_duration * 14)}〜{int(scene_duration * 16)}文字程度）。情報量を多めにし、詳細で具体的な説明を入れてください。
 - セリフは自然な話し言葉で、指定された時間内で読み上げられる長さにしてください
 - セリフは詳細で具体的な内容を含め、視聴者に価値のある情報を提供してください

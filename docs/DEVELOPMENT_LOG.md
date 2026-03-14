@@ -9,6 +9,43 @@
 
 ## 2026年
 
+### 2026-03-14 - 参考台本前処理・台本メタデータ保存・人気動画参考のタイトル・概要案・タグ抽出・動画検索フィルタ・各画面表示
+
+#### 実施内容
+- **参考台本の前処理**: 台本生成前に「参考台本」「参考台本核心部」をトピックに合わせて性教育動画の台本として整える（誤字脱字・タイムスタンプ・[音楽]等の除去）。OpenAIで実施し、整えたテキストをその後のインサイト抽出・台本生成に利用。整えた参考台本・核心部は台本生成画面の出力に表示。
+- **台本ファイルに保存するメタデータの追加**: トピック、整形後の参考台本、整形後の参考台本核心部、人気動画のタイトル・概要（参考）、人気動画を参考にしたタイトル案・概要案を台本JSONに保存。音声生成・画像生成・動画編集・台本生成の各画面でこれらを表示。
+- **人気動画を参考にしたタイトル・概要案**: 「人気動画のタイトル・概要（参考）」の内容**のみ**を材料に、本編に触れず表現を少し変えたタイトル案・概要案を1件ずつ生成（パクリ防止）。reference_metadata がある場合のみ実行し、台本に保存して各画面で表示。
+- **タグの抽出元を人気動画のタイトル・概要のみに変更**: タグは台本生成のメイン出力から削除し、「人気動画のタイトル・概要（参考）」のテキストのみから抽出（`extract_tags_from_reference_metadata`）。参考が無い場合は空配列。
+- **動画検索**: 概要（description）がある動画のみを抽出・表示するようフィルタを追加。結果メッセージに「概要がある動画のみ表示」と明記。
+- **台本入力の永続化を廃止**: 別画面に移動して戻った際の入力復元は行わない（永続キー script_form_* を削除し、キーが無いときだけ初期化する方式に戻した）。別入力項目にフォーカスを移した際の値消失を避けるため。
+- **音声生成・画像生成・動画編集画面**: 選択した台本のタイトル・概要説明・タグに加え、トピック・整形後の参考台本・整形後の参考台本核心部・人気動画のタイトル・概要（参考）・人気動画を参考にしたタイトル・概要案を表示（expander 等で折りたたみ表示）。
+
+#### 完了項目
+- [x] 参考台本・参考台本核心部の前処理（normalize_reference_scripts / normalize_reference_scripts_with_openai）。性教育動画台本として整え、誤字脱字・タイムスタンプ・[音楽]等除去
+- [x] 整えた参考台本・核心部を台本生成画面の出力に表示（session_state に保持して表示）
+- [x] 台本保存時に topic, reference_script_normalized, reference_script_core_normalized, reference_metadata を script_data に追加
+- [x] 人気動画を参考にしたタイトル・概要案の生成（generate_title_description_suggestions）。reference_metadata のみを材料に、本編に触れず表現を変える
+- [x] 台本保存時に suggested_title_from_reference, suggested_description_from_reference を追加。各画面で「人気動画を参考にしたタイトル・概要案」を表示
+- [x] タグを人気動画のタイトル・概要のみから抽出（extract_tags_from_reference_metadata）。メイン台本生成プロンプトから suggested_tags を削除し、参考がある場合のみ抽出して上書き、無い場合は []
+- [x] 動画検索で description_snippet がある動画のみに絞り込み（youtube_client.search_videos）。結果メッセージに「概要がある動画のみ表示」を追記
+- [x] 台本入力の永続化を廃止（main.py の script_form_* 削除、script_page でキー未存在時のみ初期化に戻す）
+- [x] 音声生成画面でタイトル・概要説明・タグ・トピック・整形後参考台本・整形後参考台本核心部・人気動画タイトル概要・タイトル・概要案を表示
+- [x] 画像生成・動画編集画面でも同様の台本メタデータ表示を追加（概要説明・タグ・トピック・整形後参考台本等）
+
+#### 変更ファイル
+- `scripts/script_generator.py` - normalize_reference_scripts（クラスメソッド）、normalize_reference_scripts_with_openai（モジュール関数）、generate_title_description_suggestions、extract_tags_from_reference_metadata。メイン台本プロンプトから suggested_tags 削除
+- `ui/pages/script_page.py` - 参考台本の前処理呼び出し、整えたテキストの表示・session_state 保存、台本保存時のメタデータ・タイトル概要案・タグ抽出の追加、人気動画を参考にしたタイトル・概要案の表示
+- `ui/pages/audio_page.py` - 台本選択時の概要説明・タグ・トピック・整形後参考台本・整形後核心部・人気動画タイトル概要・タイトル・概要案の表示
+- `ui/pages/image_page.py` - 同上（概要説明・タグ・トピック・整形後参考台本等・タイトル・概要案の表示）
+- `ui/pages/video_page.py` - 同上
+- `main.py` - 台本フォーム永続化用 script_form_* の初期化ブロックを削除
+- `utils/youtube_client.py` - 検索結果を description_snippet がある動画のみにフィルタ
+
+#### 備考
+- 仕様書（README_PLAN.md）、動画検索仕様（SPEC_VIDEO_SEARCH.md）、CHANGELOG.md に本作業を反映
+
+---
+
 ### 2026-03-08 - サムネイルテキスト案・核心部分・画像指定・透過PNG・台本デフォルトなど
 
 #### 実施内容

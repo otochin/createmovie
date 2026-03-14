@@ -144,13 +144,22 @@ def show_video_page():
         st.warning("保存された台本がありません。まず「📝 台本生成」ページで台本を生成・保存してください。")
         return
     
-    # 台本ファイルの選択
+    # 台本ファイルの選択（別画面から戻っても選択を保持）
     script_file_options = {f.name: f for f in script_files}
+    script_options_list = list(script_file_options.keys())
+    if "video_page_selected_script" not in st.session_state:
+        st.session_state.video_page_selected_script = script_options_list[0] if script_options_list else None
+    if st.session_state.video_page_selected_script not in script_options_list:
+        st.session_state.video_page_selected_script = script_options_list[0] if script_options_list else None
+    default_index = script_options_list.index(st.session_state.video_page_selected_script) if st.session_state.video_page_selected_script in script_options_list else 0
     selected_script_name = st.selectbox(
         "台本を選択",
-        options=list(script_file_options.keys()),
+        options=script_options_list,
+        index=default_index,
+        key="video_page_script_selectbox",
         help="動画を生成する台本を選択してください"
     )
+    st.session_state.video_page_selected_script = selected_script_name
     
     if selected_script_name:
         selected_script_path = script_file_options[selected_script_name]
@@ -187,6 +196,42 @@ def show_video_page():
             
             # 台本情報を表示
             st.info(f"**タイトル**: {script_data.get('title', 'タイトルなし')} | **シーン数**: {len(scenes_list)}")
+            description = (script_data.get("description") or "").strip()
+            if description:
+                with st.expander("📄 概要説明", expanded=False):
+                    st.write(description)
+            suggested_tags = script_data.get("suggested_tags") or []
+            if suggested_tags:
+                tags_str = ", ".join(str(t).strip() for t in suggested_tags if str(t).strip())
+                if tags_str:
+                    st.caption(f"**タグ**: {tags_str}")
+            # 台本ファイルに保存された追加項目の表示
+            _topic = (script_data.get("topic") or "").strip()
+            if _topic:
+                st.caption(f"**トピック・テーマ**: {_topic}")
+            _ref_script = (script_data.get("reference_script_normalized") or "").strip()
+            if _ref_script:
+                with st.expander("📋 整形後の参考台本", expanded=False):
+                    st.text_area("", value=_ref_script, height=120, disabled=True, key="video_ref_script", label_visibility="collapsed")
+            _ref_core = (script_data.get("reference_script_core_normalized") or "").strip()
+            if _ref_core:
+                with st.expander("📋 整形後の参考台本核心部", expanded=False):
+                    st.text_area("", value=_ref_core, height=80, disabled=True, key="video_ref_core", label_visibility="collapsed")
+            _ref_meta = (script_data.get("reference_metadata") or "").strip()
+            if _ref_meta:
+                with st.expander("📋 人気動画のタイトル・概要（参考）", expanded=False):
+                    st.text_area("", value=_ref_meta, height=100, disabled=True, key="video_ref_metadata", label_visibility="collapsed")
+            # 人気動画を参考にしたタイトル・概要案
+            _st_ref = (script_data.get("suggested_title_from_reference") or "").strip()
+            _sd_ref = (script_data.get("suggested_description_from_reference") or "").strip()
+            if _st_ref or _sd_ref:
+                with st.expander("📌 人気動画を参考にしたタイトル・概要案", expanded=False):
+                    if _st_ref:
+                        st.caption("**タイトル案**")
+                        st.text_area("", value=_st_ref, height=40, disabled=True, key="video_title_ref", label_visibility="collapsed")
+                    if _sd_ref:
+                        st.caption("**概要案**")
+                        st.text_area("", value=_sd_ref, height=80, disabled=True, key="video_desc_ref", label_visibility="collapsed")
         
         except Exception as e:
             st.error(f"❌ 台本の読み込みに失敗しました: {e}")

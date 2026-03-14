@@ -39,6 +39,8 @@ class Config:
         self.openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
         self.elevenlabs_api_key: Optional[str] = os.getenv("ELEVENLABS_API_KEY")
         self.elevenlabs_voice_id: Optional[str] = os.getenv("ELEVENLABS_VOICE_ID")
+        # YouTube Data API v3（動画検索機能用。未設定でも他機能は利用可能）
+        self.youtube_api_key: Optional[str] = os.getenv("YOUTUBE_API_KEY")
         
         # ElevenLabsモデルID（環境変数から読み込む、なければデフォルト値）
         from .constants import ELEVENLABS_MODEL_ID

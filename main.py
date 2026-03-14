@@ -75,12 +75,15 @@ ELEVENLABS_VOICE_ID=your_voice_id_here
 st.sidebar.title("🎬 ナビゲーション")
 page = st.sidebar.radio(
     "ページを選択",
-    ["🏠 ホーム", "📝 台本生成", "🎤 音声生成", "🖼️ 画像生成", "🎬 動画編集"]
+    ["🏠 ホーム", "🔍 動画検索", "📝 台本生成", "🎤 音声生成", "🖼️ 画像生成", "🎬 動画編集"]
 )
 
 # ページルーティング
 if page == "🏠 ホーム":
     show_home_page()
+elif page == "🔍 動画検索":
+    from ui.pages.video_search_page import show_video_search_page
+    show_video_search_page()
 elif page == "📝 台本生成":
     from ui.pages.script_page import show_script_page
     show_script_page()
