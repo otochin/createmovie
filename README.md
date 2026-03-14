@@ -66,6 +66,16 @@ streamlit run main.py
 
 ブラウザが自動的に開き、アプリケーションが表示されます。
 
+## トラブルシューティング
+
+### `TypeError: Failed to fetch dynamically imported module` が出る場合
+
+動画編集画面などで上記のエラーが出る場合は、Streamlit の再読み込み後にブラウザが古い JavaScript を参照していることが原因です。次のいずれかを試してください。
+
+1. **スーパーリロード（推奨）**: ブラウザで **Ctrl+Shift+R**（Windows/Linux）または **Cmd+Shift+R**（Mac）でハードリロードする
+2. **Streamlit の再起動**: ターミナルで `Ctrl+C` でサーバーを止め、`streamlit run main.py` で再起動してから、ブラウザでページを再読み込みする
+3. **キャッシュの削除**: ブラウザの開発者ツール（F12）→ ネットワークタブで「キャッシュを無効化」にチェックを入れてリロードする、または localhost のサイトデータを削除する
+
 ## プロジェクト構造
 
 詳細は `docs/README_PLAN.md` を参照してください。

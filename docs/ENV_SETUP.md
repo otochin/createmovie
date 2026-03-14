@@ -311,6 +311,9 @@ A: ElevenLabsのVoice Libraryで検索できます。日本語音声を検索し
 ### Q: 設定を変更した後、アプリを再起動する必要がありますか？
 A: はい、`.env`ファイルを変更した後は、Streamlitアプリを再起動してください。
 
+### Q: 動画編集画面で「TypeError: Failed to fetch dynamically imported module」と表示されます
+A: Streamlit のフロントエンドのキャッシュが原因です。プロジェクトルートの **README.md** の「トラブルシューティング」を参照し、スーパーリロード（Cmd+Shift+R / Ctrl+Shift+R）やサーバー再起動を試してください。
+
 ---
 
 設定が完了したら、アプリケーションを起動して台本生成機能を試してみてください！
